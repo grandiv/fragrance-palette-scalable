@@ -1,0 +1,28 @@
+name: Deploy to Kubernetes
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build Backend
+        run: |
+          cd Backend
+          docker build -t ${{ secrets.REGISTRY }}/fragrance-backend:${{ github.sha }} .
+          docker push ${{ secrets.REGISTRY }}/fragrance-backend:${{ github.sha }}
+
+      - name: Build Frontend
+        run: |
+          cd Frontend
+          docker build -t ${{ secrets.REGISTRY }}/fragrance-frontend:${{ github.sha }} .
+          docker push ${{ secrets.REGISTRY }}/fragrance-frontend:${{ github.sha }}
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl set image deployment/backend backend=${{ secrets.REGISTRY }}/fragrance-backend:${{ github.sha }} -n fragrance-palette
+          kubectl set image deployment/frontend frontend=${{ secrets.REGISTRY }}/fragrance-frontend:${{ github.sha }} -n fragrance-palette

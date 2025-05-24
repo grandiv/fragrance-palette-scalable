@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-replica
+  namespace: fragrance-palette
+spec:
+  serviceName: postgres-replica
+  replicas: 2
+  selector:
+    matchLabels:
+      app: postgres-replica
+  template:
+    metadata:
+      labels:
+        app: postgres-replica
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          env:
+            - name: PGUSER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+            - name: POSTGRES_MASTER_SERVICE
+              value: postgres-master
+            - name: POSTGRES_REPLICATION_USER
+              value: replicator
+            - name: POSTGRES_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: replication-password
+          command:
+            - /bin/bash
+            - -c
+            - |
+              pg_basebackup -h $POSTGRES_MASTER_SERVICE -D /var/lib/postgresql/data -U $POSTGRES_REPLICATION_USER -v -P -W
+              echo "standby_mode = 'on'" >> /var/lib/postgresql/data/recovery.conf
+              echo "primary_conninfo = 'host=$POSTGRES_MASTER_SERVICE port=5432 user=$POSTGRES_REPLICATION_USER'" >> /var/lib/postgresql/data/recovery.conf
+              postgres
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
