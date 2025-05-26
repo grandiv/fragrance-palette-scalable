@@ -1,5 +1,11 @@
 import { DatabaseRouter } from "../utils/prisma.js";
-import { redisClient } from "../utils/redis.js";
+import {
+  redisClient,
+  redisGet,
+  redisSetex,
+  redisDel,
+  redisKeys,
+} from "../utils/redis.js";
 import { publishToQueue } from "../services/rabbitmq.js";
 import { callLLM } from "../services/aiService.js";
 
@@ -12,7 +18,7 @@ export const getUserFormulas = async (req, res) => {
 
     // Try Redis cache first
     const cacheKey = `formulas:${userId}:${page}:${limit}`;
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
 
     if (cached) {
       return res.json(JSON.parse(cached));
@@ -45,7 +51,7 @@ export const getUserFormulas = async (req, res) => {
     };
 
     // Cache for 5 minutes
-    await redisClient.setex(cacheKey, 300, JSON.stringify(result));
+    await redisSetex(cacheKey, 300, JSON.stringify(result));
 
     res.json(result);
   } catch (error) {
@@ -59,8 +65,10 @@ export const generateFormula = async (req, res) => {
     const { description } = req.body;
     const userId = req.user.id;
 
-    if (!description) {
-      return res.status(400).json({ error: "Description is required" });
+    if (!description || description.trim().length < 10) {
+      return res.status(400).json({
+        error: "Description must be at least 10 characters long",
+      });
     }
 
     // Create a task ID for tracking
@@ -69,30 +77,42 @@ export const generateFormula = async (req, res) => {
       .substr(2, 9)}`;
 
     // Store initial task status in Redis
-    await redisClient.setex(
+    await redisSetex(
       `task:${taskId}`,
       600,
       JSON.stringify({
-        status: "processing",
+        status: "queued",
         progress: 0,
-        message: "Generating fragrance formula...",
+        message: "Request queued for processing...",
       })
     );
 
-    // Process in background
-    processFormulaGeneration(taskId, description, userId);
+    // Publish to RabbitMQ queue for background processing
+    await publishToQueue("formula.generate", {
+      taskId,
+      description: description.trim(),
+      userId,
+      timestamp: new Date().toISOString(),
+    });
 
-    res.json({ taskId, status: "processing" });
+    console.log(`Formula generation queued: ${taskId} for user: ${userId}`);
+
+    res.json({
+      taskId,
+      status: "queued",
+      message:
+        "Your formula generation request has been queued. Please check status using the taskId.",
+    });
   } catch (error) {
     console.error("Generate formula error:", error);
-    res.status(500).json({ error: "Failed to generate formula" });
+    res.status(500).json({ error: "Failed to queue formula generation" });
   }
 };
 
 export const getGenerationStatus = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const status = await redisClient.get(`task:${taskId}`);
+    const status = await redisGet(`task:${taskId}`);
 
     if (!status) {
       return res.status(404).json({ error: "Task not found" });
@@ -108,7 +128,7 @@ export const getGenerationStatus = async (req, res) => {
 async function processFormulaGeneration(taskId, description, userId) {
   try {
     // Update progress
-    await redisClient.setex(
+    await redisSetex(
       `task:${taskId}`,
       600,
       JSON.stringify({
@@ -121,7 +141,7 @@ async function processFormulaGeneration(taskId, description, userId) {
     // Call AI service
     const formulaData = await callLLM(description);
 
-    await redisClient.setex(
+    await redisSetex(
       `task:${taskId}`,
       600,
       JSON.stringify({
@@ -144,13 +164,13 @@ async function processFormulaGeneration(taskId, description, userId) {
 
     // Clear user's formulas cache
     const cachePattern = `formulas:${userId}:*`;
-    const keys = await redisClient.keys(cachePattern);
+    const keys = await redisKeys(cachePattern);
     if (keys.length > 0) {
-      await redisClient.del(...keys);
+      await redisDel(...keys);
     }
 
     // Update final status
-    await redisClient.setex(
+    await redisSetex(
       `task:${taskId}`,
       300,
       JSON.stringify({
@@ -162,7 +182,7 @@ async function processFormulaGeneration(taskId, description, userId) {
     );
   } catch (error) {
     console.error("Formula generation error:", error);
-    await redisClient.setex(
+    await redisSetex(
       `task:${taskId}`,
       300,
       JSON.stringify({

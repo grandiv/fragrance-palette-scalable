@@ -1,24 +1,29 @@
 import express from "express";
-import client from "prom-client";
+import {
+  register,
+  redisConnectionStatus,
+  databaseConnectionsActive,
+} from "../services/metrics.js";
+import { prismaMaster } from "../utils/prisma.js";
+import { redisPing } from "../utils/redis.js";
 
 const router = express.Router();
 
-// Create metrics
-const httpRequestsTotal = new client.Counter({
-  name: "http_requests_total",
-  help: "Total number of HTTP requests",
-  labelNames: ["method", "route", "status"],
-});
-
-const httpRequestDuration = new client.Histogram({
-  name: "http_request_duration_seconds",
-  help: "Duration of HTTP requests in seconds",
-  labelNames: ["method", "route"],
-});
-
 router.get("/", async (req, res) => {
-  res.set("Content-Type", client.register.contentType);
-  res.end(await client.register.metrics());
+  try {
+    // Update real-time metrics
+    const redisStatus = await redisPing();
+    redisConnectionStatus.set(redisStatus ? 1 : 0);
+
+    // You can add more real-time metrics here
+    // databaseConnectionsActive.set(await getActiveConnections());
+
+    res.set("Content-Type", register.contentType);
+    res.end(await register.metrics());
+  } catch (error) {
+    console.error("Metrics error:", error);
+    res.status(500).send("Error generating metrics");
+  }
 });
 
 export default router;

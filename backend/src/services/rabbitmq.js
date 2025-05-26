@@ -1,72 +1,87 @@
 import amqp from "amqplib";
 import { callLLM } from "./aiService.js";
-import { prisma } from "../utils/prisma.js";
-import { redisClient } from "../utils/redis.js";
+import { prismaMaster as prisma } from "../utils/prisma.js";
+import {
+  redisClient,
+  redisSetex,
+  redisDel,
+  redisKeys,
+} from "../utils/redis.js";
 
 let connection;
 let channel;
 
 export async function connectRabbitMQ() {
   try {
-    connection = await amqp.connect(
-      process.env.RABBITMQ_URL || "amqp://localhost"
-    );
+    const rabbitmqURL = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+    connection = await amqp.connect(rabbitmqURL);
     channel = await connection.createChannel();
 
-    await channel.assertQueue("formula_generation", { durable: true });
-    await channel.assertQueue("domain_knowledge", { durable: true });
-    await channel.assertQueue("database_queries", { durable: true });
-
-    console.log("Connected to RabbitMQ");
+    // Declare queues
+    await channel.assertQueue("formula.generate", { durable: true });
+    await channel.assertQueue("domain.knowledge", { durable: true });
+    await channel.assertQueue("database.query", { durable: true });
 
     // Start consumers
-    startFormulaGenerationConsumer();
-    startDomainKnowledgeConsumer();
-    startDatabaseQueryConsumer();
+    await startFormulaGenerationConsumer();
+    await startDomainKnowledgeConsumer();
+    await startDatabaseQueryConsumer();
+
+    console.log("✅ Connected to RabbitMQ");
   } catch (error) {
-    console.error("RabbitMQ connection error:", error);
+    console.error("❌ Failed to connect to RabbitMQ:", error);
+    throw error;
   }
 }
 
 export async function publishToQueue(queueName, data) {
-  if (!channel) {
-    throw new Error("RabbitMQ not connected");
-  }
+  try {
+    if (!channel) {
+      throw new Error("RabbitMQ channel not available");
+    }
 
-  await channel.sendToQueue(queueName, Buffer.from(JSON.stringify(data)), {
-    persistent: true,
-  });
+    const message = Buffer.from(JSON.stringify(data));
+    await channel.sendToQueue(queueName, message, { persistent: true });
+    console.log(`📤 Published to queue ${queueName}:`, data);
+  } catch (error) {
+    console.error("❌ Failed to publish to queue:", error);
+    throw error;
+  }
 }
 
 async function startFormulaGenerationConsumer() {
   await channel.consume(
-    "formula_generation",
+    "formula.generate",
     async (msg) => {
       if (msg !== null) {
         try {
           const data = JSON.parse(msg.content.toString());
           const { taskId, userId, description } = data;
 
+          console.log(`🔄 Processing formula generation: ${taskId}`);
+
           // Update task status
-          await redisClient.setex(
+          await redisSetex(
             `task:${taskId}`,
             3600,
             JSON.stringify({
               status: "processing",
-              progress: 0,
+              progress: 25,
+              message: "Analyzing fragrance description...",
             })
           );
 
-          // Generate formula
+          // Generate formula using AI service
           const formulaResponse = await callLLM(description);
 
           // Update progress
-          await redisClient.setex(
+          await redisSetex(
             `task:${taskId}`,
             3600,
             JSON.stringify({
               status: "processing",
-              progress: 50,
+              progress: 75,
+              message: "Saving formula to database...",
             })
           );
 
@@ -91,30 +106,32 @@ async function startFormulaGenerationConsumer() {
           const cacheKey = `formula:${userId}:${Buffer.from(
             description
           ).toString("base64")}`;
-          await redisClient.setex(cacheKey, 3600, JSON.stringify(formula));
+          await redisSetex(cacheKey, 3600, JSON.stringify(formula));
 
-          await redisClient.setex(
+          await redisSetex(
             `task:${taskId}`,
             3600,
             JSON.stringify({
               status: "completed",
               progress: 100,
+              message: "Formula generated successfully!",
               result: formula,
             })
           );
 
           // Clear user formulas cache
-          const keys = await redisClient.keys(`formulas:${userId}:*`);
+          const keys = await redisKeys(`formulas:${userId}:*`);
           if (keys.length > 0) {
-            await redisClient.del(keys);
+            await redisDel(...keys);
           }
 
+          console.log(`✅ Formula generation completed: ${taskId}`);
           channel.ack(msg);
         } catch (error) {
-          console.error("Formula generation error:", error);
+          console.error("❌ Formula generation error:", error);
 
           const data = JSON.parse(msg.content.toString());
-          await redisClient.setex(
+          await redisSetex(
             `task:${data.taskId}`,
             3600,
             JSON.stringify({
@@ -133,17 +150,19 @@ async function startFormulaGenerationConsumer() {
 
 async function startDomainKnowledgeConsumer() {
   await channel.consume(
-    "domain_knowledge",
+    "domain.knowledge",
     async (msg) => {
       if (msg !== null) {
         try {
           const data = JSON.parse(msg.content.toString());
-          // Process domain knowledge fetching
-          console.log("Processing domain knowledge:", data);
+          console.log("🔄 Processing domain knowledge request:", data);
+
+          // Process domain knowledge request here
+          // This could involve fetching fragrance data, trends, etc.
 
           channel.ack(msg);
         } catch (error) {
-          console.error("Domain knowledge error:", error);
+          console.error("❌ Domain knowledge processing error:", error);
           channel.nack(msg, false, false);
         }
       }
@@ -154,17 +173,19 @@ async function startDomainKnowledgeConsumer() {
 
 async function startDatabaseQueryConsumer() {
   await channel.consume(
-    "database_queries",
+    "database.query",
     async (msg) => {
       if (msg !== null) {
         try {
           const data = JSON.parse(msg.content.toString());
-          // Process database queries
-          console.log("Processing database query:", data);
+          console.log("🔄 Processing database query:", data);
+
+          // Process database queries here
+          // This could involve complex queries, data aggregation, etc.
 
           channel.ack(msg);
         } catch (error) {
-          console.error("Database query error:", error);
+          console.error("❌ Database query processing error:", error);
           channel.nack(msg, false, false);
         }
       }
@@ -174,6 +195,15 @@ async function startDatabaseQueryConsumer() {
 }
 
 export async function closeRabbitMQ() {
-  if (channel) await channel.close();
-  if (connection) await connection.close();
+  try {
+    if (channel) {
+      await channel.close();
+    }
+    if (connection) {
+      await connection.close();
+    }
+    console.log("🔄 RabbitMQ connection closed");
+  } catch (error) {
+    console.error("❌ Error closing RabbitMQ connection:", error);
+  }
 }

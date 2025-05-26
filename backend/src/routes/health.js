@@ -1,5 +1,5 @@
 import express from "express";
-import { redisClient } from "../utils/redis.js";
+import { redisPing } from "../utils/redis.js";
 import { prismaMaster } from "../utils/prisma.js";
 
 const router = express.Router();
@@ -9,15 +9,15 @@ router.get("/", async (req, res) => {
     // Check database connection
     await prismaMaster.$queryRaw`SELECT 1`;
 
-    // Check Redis connection
-    await redisClient.ping();
+    // Check Redis connection (non-blocking)
+    const redisStatus = await redisPing();
 
     res.json({
       status: "healthy",
       timestamp: new Date().toISOString(),
       services: {
         database: "connected",
-        redis: "connected",
+        redis: redisStatus ? "connected" : "unavailable",
       },
     });
   } catch (error) {

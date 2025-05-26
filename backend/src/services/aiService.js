@@ -23,13 +23,55 @@ const fragranceFamilyKeywords = {
   woody: ["wood", "woody", "cedar", "sandalwood", "pine", "forest", "earthy"],
   oriental: ["oriental", "spice", "vanilla", "amber", "cinnamon", "warm"],
   fresh: ["fresh", "aqua", "water", "marine", "green", "mint", "cool"],
+  gourmand: ["sweet", "vanilla", "chocolate", "honey", "caramel", "dessert"],
 };
+
+async function callTGI(prompt, parameters = {}) {
+  const defaultParams = {
+    max_new_tokens: 150,
+    temperature: 0.7,
+    top_p: 0.9,
+    repetition_penalty: 1.2,
+    do_sample: true,
+    stop: ["\n\n"],
+  };
+
+  try {
+    const response = await fetch(`${process.env.LLM_URL}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: { ...defaultParams, ...parameters },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `TGI API error: ${response.status} ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+    return data.generated_text || "";
+  } catch (error) {
+    console.error("TGI API call failed:", error);
+    throw new Error(`AI service unavailable: ${error.message}`);
+  }
+}
 
 export async function callLLM(prompt) {
   try {
+    console.log(`Processing fragrance request: "${prompt}"`);
+
     const family = await identifyFragranceFamily(prompt);
+    console.log(`Identified family: ${family.name}`);
+
     const notes = await generateNotes(prompt, family);
+    console.log(`Generated notes:`, notes);
+
     const mixingAndName = await generateMixingAndName(notes, family);
+    console.log(`Generated name and mixing:`, mixingAndName);
 
     return {
       fragranceFamilyId: family.id,
@@ -81,83 +123,82 @@ async function identifyFragranceFamily(prompt) {
 }
 
 async function generateNotes(prompt, family) {
-  const res = await fetch(process.env.LLM_URL + "/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      inputs: `For a ${family.name} perfume described as "${prompt}", suggest ONE specific ingredient for each note level:
-      
-Top note: 
+  const notePrompt = `<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are a professional perfumer. Create specific perfume ingredients for each note level.
+
+<|eot_id|><|start_header_id|>user<|end_header_id|>
+For a ${family.name.toLowerCase()} fragrance described as "${prompt}", suggest exactly ONE specific ingredient for each note level:
+
+Top note:
 Middle note:
-Base note:`,
-      parameters: {
-        temperature: 0.6,
-        top_p: 0.3,
-        repetition_penalty: 1.3,
-      },
-    }),
+Base note:
+
+<|eot_id|><|start_header_id|>assistant<|end_header_id|>`;
+
+  const response = await callTGI(notePrompt, {
+    temperature: 0.6,
+    max_new_tokens: 100,
+    stop: ["<|eot_id|>"],
   });
 
-  if (!res.ok) throw new Error(`LLM error: ${res.status}`);
+  const topNoteMatch = response.match(/Top note:?\s*([^\n]+)/i);
+  const middleNoteMatch = response.match(/Middle note:?\s*([^\n]+)/i);
+  const baseNoteMatch = response.match(/Base note:?\s*([^\n]+)/i);
 
-  const json = await res.json();
-  const text = json.generated_text;
-
-  const topNoteMatch = text.match(/Top note:?\s*([^\n]+)/i);
-  const middleNoteMatch = text.match(/Middle note:?\s*([^\n]+)/i);
-  const baseNoteMatch = text.match(/Base note:?\s*([^\n]+)/i);
-
-  const topNote = topNoteMatch ? topNoteMatch[1].trim() : family.ingredients[0];
-  const middleNote = middleNoteMatch
-    ? middleNoteMatch[1].trim()
-    : family.ingredients[Math.min(1, family.ingredients.length - 1)];
-  const baseNote = baseNoteMatch
-    ? baseNoteMatch[1].trim()
-    : family.ingredients[Math.min(2, family.ingredients.length - 1)];
-
-  return { topNote, middleNote, baseNote };
+  return {
+    topNote: topNoteMatch
+      ? topNoteMatch[1].trim()
+      : family.ingredients[0] || "Bergamot",
+    middleNote: middleNoteMatch
+      ? middleNoteMatch[1].trim()
+      : family.ingredients[1] || "Rose",
+    baseNote: baseNoteMatch
+      ? baseNoteMatch[1].trim()
+      : family.ingredients[2] || "Sandalwood",
+  };
 }
 
 async function generateMixingAndName(notes, family) {
-  const res = await fetch(process.env.LLM_URL + "/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      inputs: `Create a perfume name and simple mixing instruction for a ${family.name} perfume with these notes:
+  const namePrompt = `Create a creative perfume name for a ${family.name.toLowerCase()} fragrance with these notes:
+- Top: ${notes.topNote}
+- Middle: ${notes.middleNote}
+- Base: ${notes.baseNote}
+
+Name: `;
+
+  const mixingPrompt = `Provide simple mixing instructions for a beginner perfumer making a ${family.name.toLowerCase()} fragrance with:
 - Top note: ${notes.topNote}
 - Middle note: ${notes.middleNote}
 - Base note: ${notes.baseNote}
 
-Name: 
-Mixing instruction: `,
-      parameters: {
-        temperature: 0.7,
-        top_p: 0.3,
-        repetition_penalty: 1.3,
-      },
-    }),
-  });
+Instructions: `;
 
-  if (!res.ok) throw new Error(`LLM error: ${res.status}`);
+  try {
+    const [nameResponse, mixingResponse] = await Promise.all([
+      callTGI(namePrompt, { temperature: 0.8, max_new_tokens: 20 }),
+      callTGI(mixingPrompt, { temperature: 0.5, max_new_tokens: 100 }),
+    ]);
 
-  const json = await res.json();
-  const text = json.generated_text;
+    const nameMatch = nameResponse.match(/Name:?\s*([^\n]+)/i);
+    const mixingMatch = mixingResponse.match(/Instructions?:?\s*([^\n]+)/i);
 
-  const nameMatch = text.match(/Name:?\s*([^\n]+)/i);
-  const mixingMatch =
-    text.match(/Mixing instruction:?\s*([^\n]+)/i) ||
-    text.match(/\d+\.\s*([^\n]+)/);
+    const name = nameMatch
+      ? nameMatch[1].trim()
+      : `${notes.topNote} ${family.name} Essence`;
+    let mixing = mixingMatch
+      ? mixingMatch[1].trim()
+      : `Combine 3 drops of ${notes.topNote}, 2 drops of ${notes.middleNote}, and 1 drop of ${notes.baseNote}. Let mature for one week.`;
 
-  const name = nameMatch
-    ? nameMatch[1].trim()
-    : `${notes.topNote} ${family.name} Blend`;
-  let mixing = mixingMatch
-    ? mixingMatch[1].trim()
-    : `Combine 3 drops of ${notes.topNote}, 2 drops of ${notes.middleNote}, and 1 drop of ${notes.baseNote}. Let mature for one week.`;
+    if (mixing.length < 30) {
+      mixing = `Combine 3 drops of ${notes.topNote}, 2 drops of ${notes.middleNote}, and 1 drop of ${notes.baseNote}. Mix gently and let mature for one week in a cool, dark place.`;
+    }
 
-  if (mixing.length < 30) {
-    mixing = `Combine 3 drops of ${notes.topNote}, 2 drops of ${notes.middleNote}, and 1 drop of ${notes.baseNote}. Let mature for one week.`;
+    return { name, mixing };
+  } catch (error) {
+    console.error("Error generating name/mixing:", error);
+    return {
+      name: `${notes.topNote} ${family.name} Blend`,
+      mixing: `Combine 3 drops of ${notes.topNote}, 2 drops of ${notes.middleNote}, and 1 drop of ${notes.baseNote}. Let mature for one week.`,
+    };
   }
-
-  return { name, mixing };
 }

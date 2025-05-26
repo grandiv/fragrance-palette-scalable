@@ -1,3 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: fragrance-palette
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - "/etc/prometheus/rules/*.yml"
+
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+      
+      - job_name: 'backend'
+        static_configs:
+          - targets: ['backend:80']
+        metrics_path: '/api/metrics'
+        scrape_interval: 10s
+      
+      - job_name: 'postgres-exporter'
+        static_configs:
+          - targets: ['postgres-exporter:9187']
+      
+      - job_name: 'redis-exporter'
+        static_configs:
+          - targets: ['redis-exporter:9121']
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,48 +52,28 @@ spec:
           image: prom/prometheus:latest
           ports:
             - containerPort: 9090
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/prometheus/
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus/"
             - "--web.console.libraries=/etc/prometheus/console_libraries"
             - "--web.console.templates=/etc/prometheus/consoles"
+            - "--storage.tsdb.retention.time=200h"
             - "--web.enable-lifecycle"
-          volumeMounts:
-            - name: prometheus-config
-              mountPath: /etc/prometheus/
-            - name: prometheus-storage
-              mountPath: /prometheus/
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
       volumes:
-        - name: prometheus-config
+        - name: config-volume
           configMap:
             name: prometheus-config
-        - name: prometheus-storage
-          persistentVolumeClaim:
-            claimName: prometheus-pvc
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus-config
-  namespace: fragrance-palette
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 15s
-    scrape_configs:
-    - job_name: 'backend'
-      static_configs:
-      - targets: ['backend:80']
-      metrics_path: '/api/metrics'
-    - job_name: 'postgres'
-      static_configs:
-      - targets: ['postgres-exporter:9187']
-    - job_name: 'redis'
-      static_configs:
-      - targets: ['redis-exporter:9121']
-    - job_name: 'rabbitmq'
-      static_configs:
-      - targets: ['rabbitmq:15692']
+
 ---
 apiVersion: v1
 kind: Service
@@ -72,15 +86,4 @@ spec:
   ports:
     - port: 9090
       targetPort: 9090
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: prometheus-pvc
-  namespace: fragrance-palette
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
+  type: ClusterIP
