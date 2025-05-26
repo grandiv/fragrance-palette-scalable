@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useContext, useState, useEffect } from "react";
 import Cookies from "js-cookie";
-import { authAPI } from "@/lib/api";
+import { api } from "@/lib/api";
 
 const AuthContext = createContext();
 
@@ -15,15 +15,16 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = Cookies.get("token");
-    if (token) {
-      // Decode token to get user info (or make API call)
+    const savedToken = Cookies.get("token");
+    if (savedToken) {
       try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        setUser({ id: payload.userId });
+        const payload = JSON.parse(atob(savedToken.split(".")[1]));
+        setUser({ id: payload.userId, email: payload.email });
+        setToken(savedToken);
       } catch (error) {
         Cookies.remove("token");
         console.log("Invalid token:", error);
@@ -33,31 +34,56 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (credentials) => {
-    const response = await authAPI.login(credentials);
-    const { token, user } = response.data;
+    try {
+      const response = await api.auth.login(credentials);
+      const { token: newToken, user: userData } = response.data;
 
-    Cookies.set("token", token, { expires: 7 });
-    setUser(user);
+      Cookies.set("token", newToken, { expires: 7 });
+      setToken(newToken);
+      setUser(userData);
 
-    return response.data;
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error || "Login failed",
+      };
+    }
+  };
+
+  const register = async (userData) => {
+    try {
+      const response = await api.auth.register(userData);
+      const { token: newToken, user: newUser } = response.data;
+
+      Cookies.set("token", newToken, { expires: 7 });
+      setToken(newToken);
+      setUser(newUser);
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.error || "Registration failed",
+      };
+    }
   };
 
   const logout = () => {
     Cookies.remove("token");
+    setToken(null);
     setUser(null);
   };
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        login,
-        logout,
-        loading,
-        isAuthenticated: !!user,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  const value = {
+    user,
+    token,
+    loading,
+    login,
+    register,
+    logout,
+    isAuthenticated: !!user,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

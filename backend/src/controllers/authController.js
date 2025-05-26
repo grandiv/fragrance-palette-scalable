@@ -1,6 +1,6 @@
-import bcrypt from "brycptjs";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { prisma } from "../utils/prisma.js";
+import { prismaMaster as prisma } from "../utils/prisma.js";
 
 export const register = async (req, res) => {
   try {

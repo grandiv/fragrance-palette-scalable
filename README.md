@@ -14,12 +14,19 @@ Home perfumers and fragrance hobbyists often find it challenging to create basic
 
 1. React frontend
 2. Express backend
-3. Content Delivery Network with Cloudflare
+3. Content Delivery Network with Cloudflare for static assets in landing page
 4. Load Balancer with NGINX
 5. Orchestration with Kubernetes
-6. Caching with Redis
-7. Queueing with RabbitMQ
-8. PostgreSQL database (1 Master for Write operations and 2 replicas for Read operations)
+6. Caching with Redis for session data and formula results
+7. Queueing with RabbitMQ for fetching domain knowledge -> generation -> fetching current database
+8. PostgreSQL database (1 master for Write operations and 2 replicas for Read operations)
 9. Monitoring with Grafana and Prometheus
-10. AI inference with Text Generation Inference (TGI)
-11. Llama-3-2-1B AI model
+10. AI inference with Text Generation Inference (TGI) using model Llama3-2-1B
+
+## Local Testing:
+
+1. Run Text Generation Inference (TGI) on port 8080:80
+2. Run Redis on port 6379:6379
+3. Run RabbitMQ on port 5672:5672
+4. Run `cd backend` and `npm start` on terminal
+5. Run `cd ../frontend` and `npm run dev` again

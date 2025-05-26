@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { prisma } from "../utils/prisma.js";
+import { prismaReplica as prisma } from "../utils/prisma.js";
 
 export const authMiddleware = async (req, res, next) => {
   try {
@@ -21,6 +21,7 @@ export const authMiddleware = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
+    console.error("Auth middleware error:", error);
     return res.status(401).json({ error: "Invalid token" });
   }
 };

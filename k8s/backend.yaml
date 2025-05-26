@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: vidnarg/fragrance-palette-backend:latest # NEED REVISION
+          image: vidnarg/fragrance-palette-backend:latest
           ports:
             - containerPort: 3001
           env:
@@ -24,18 +24,38 @@ spec:
                 secretKeyRef:
                   name: app-secrets
                   key: database-url
+            - name: DATABASE_URL_MASTER
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: database-url
+            - name: DATABASE_URL_REPLICA
+              value: "postgresql://postgres:postgresmaster@postgres-replica:5432/fragrances"
             - name: REDIS_HOST
               value: redis
+            - name: REDIS_PORT
+              value: "6379"
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: redis-secret
+                  key: password
+            - name: RABBITMQ_URL
+              value: "amqp://admin:$(RABBITMQ_PASSWORD)@rabbitmq:5672"
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
                   key: password
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: app-secrets
                   key: jwt-secret
+            - name: LLM_URL
+              value: "http://text-generation-inference:8080"
+            - name: NODE_ENV
+              value: "production"
           resources:
             requests:
               memory: "256Mi"
@@ -43,6 +63,18 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service

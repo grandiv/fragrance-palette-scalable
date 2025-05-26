@@ -25,20 +25,26 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       Cookies.remove("token");
-      window.location.href = "/auth/signin";
+      window.location.href = "/login";
     }
     return Promise.reject(error);
   }
 );
 
-export const authAPI = {
-  login: (credentials) => apiClient.post("/api/auth/login", credentials),
-  register: (userData) => apiClient.post("/api/auth/register", userData),
+export const api = {
+  auth: {
+    login: (credentials) => apiClient.post("/api/auth/login", credentials),
+    register: (userData) => apiClient.post("/api/auth/register", userData),
+  },
+  formulas: {
+    generate: (description) =>
+      apiClient.post("/api/formulas/generate", { description }),
+    getStatus: (taskId) => apiClient.get(`/api/formulas/status/${taskId}`),
+    getUserFormulas: (page = 1, limit = 10) =>
+      apiClient.get(`/api/formulas?page=${page}&limit=${limit}`),
+  },
 };
 
-export const formulaAPI = {
-  generate: (description) =>
-    apiClient.post("/api/formulas/generate", { description }),
-  getUserFormulas: (page = 1, limit = 10) =>
-    apiClient.get(`/api/formulas?page=${page}&limit=${limit}`),
-};
+// Backward compatibility exports
+export const authAPI = api.auth;
+export const formulaAPI = api.formulas;
