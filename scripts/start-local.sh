@@ -48,13 +48,13 @@ FRONTEND_PID=""
 
 echo -e "${BLUE}🚀 Starting Fragrance Palette Local Development Environment${NC}"
 
-# Start infrastructure services
-echo -e "${YELLOW}📦 Starting infrastructure services...${NC}"
+# Start infrastructure services including monitoring
+echo -e "${YELLOW}📦 Starting infrastructure and monitoring services...${NC}"
 docker-compose up -d --build
 
 # Wait for services to be ready
 echo -e "${YELLOW}⏳ Waiting for services to be ready...${NC}"
-sleep 30
+sleep 45
 
 # Check if services are ready
 echo -e "${YELLOW}🔍 Checking service health...${NC}"
@@ -85,6 +85,10 @@ echo -e "${GREEN}Frontend started with PID: $FRONTEND_PID${NC}"
 echo -e "${GREEN}✅ All services started!${NC}"
 echo -e "${BLUE}📱 Frontend: http://localhost:3000${NC}"
 echo -e "${BLUE}🔧 Backend: http://localhost:3001${NC}"
+echo -e "${BLUE} Health Check: http://localhost:3001/api/health${NC}"
+echo -e "${BLUE} Metrics: http://localhost:3001/api/metrics${NC}"
+echo -e "${BLUE} Prometheus: http://localhost:9090${NC}"
+echo -e "${BLUE} Grafana: http://localhost:3030 (admin/admin123)${NC}"
 echo -e "${BLUE}🔀 Load Balancer: http://localhost:80${NC}"
 echo -e "${BLUE}🐰 RabbitMQ Management: http://localhost:15672 (admin/admin123)${NC}"
 echo -e "${BLUE}📊 Redis: localhost:6379${NC}"

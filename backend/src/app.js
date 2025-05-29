@@ -13,6 +13,7 @@ import { connectRabbitMQ, closeRabbitMQ } from "./services/rabbitmq.js";
 import { prismaMaster } from "./utils/prisma.js";
 import { redisClient, redisPing } from "./utils/redis.js";
 import { queueProcessor } from "./services/queueProcessor.js";
+import { metricsMiddleware } from "./middlewares/metrics.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,6 +36,9 @@ const limiter = rateLimit({
 
 app.use(limiter);
 app.use(express.json({ limit: "10mb" }));
+
+// Add metrics middleware
+app.use(metricsMiddleware);
 
 // Request logging middleware
 app.use((req, res, next) => {

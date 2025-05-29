@@ -3,26 +3,24 @@ import { httpRequestsTotal, httpRequestDuration } from "../services/metrics.js";
 export const metricsMiddleware = (req, res, next) => {
   const start = Date.now();
 
-  // Override res.end to capture metrics
+  // Override res.end to capture response
   const originalEnd = res.end;
   res.end = function (...args) {
     const duration = (Date.now() - start) / 1000;
-    const route = req.route?.path || req.path;
 
     // Record metrics
     httpRequestsTotal.inc({
       method: req.method,
-      route: route,
+      route: req.route?.path || req.path,
       status_code: res.statusCode,
     });
 
-    httpRequestDuration.observe(
-      {
+    httpRequestDuration
+      .labels({
         method: req.method,
-        route: route,
-      },
-      duration
-    );
+        route: req.route?.path || req.path,
+      })
+      .observe(duration);
 
     originalEnd.apply(this, args);
   };
