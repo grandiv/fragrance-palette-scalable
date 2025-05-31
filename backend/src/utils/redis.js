@@ -1,27 +1,37 @@
 import Redis from "ioredis";
 
 const redisConfig = {
-  host: process.env.REDIS_HOST || "localhost",
-  port: process.env.REDIS_PORT || 6379,
+  host: process.env.REDIS_HOST || "redis-master", // Changed default
+  port: parseInt(process.env.REDIS_PORT) || 6379,
   password: process.env.REDIS_PASSWORD,
   db: 0,
   retryDelayOnFailover: 100,
   maxRetriesPerRequest: 3,
-  lazyConnect: true, // Don't connect immediately
-  enableOfflineQueue: false, // Don't queue commands when offline
+  lazyConnect: true,
+  enableOfflineQueue: false,
+  // Add connection timeout
+  connectTimeout: 10000,
+  commandTimeout: 5000,
 };
+
+console.log(`🔄 Redis config: ${redisConfig.host}:${redisConfig.port}`);
 
 export const redisClient = new Redis(redisConfig);
 
 let isRedisAvailable = false;
 
 redisClient.on("connect", () => {
-  console.log("✅ Connected to Redis");
+  console.log(
+    `✅ Connected to Redis at ${redisConfig.host}:${redisConfig.port}`
+  );
   isRedisAvailable = true;
 });
 
 redisClient.on("error", (err) => {
-  console.warn("⚠️  Redis connection failed:", err.message);
+  console.warn(
+    `⚠️  Redis connection failed (${redisConfig.host}:${redisConfig.port}):`,
+    err.message
+  );
   isRedisAvailable = false;
 });
 
@@ -30,7 +40,7 @@ redisClient.on("close", () => {
   isRedisAvailable = false;
 });
 
-// Wrapper functions to handle Redis unavailability
+// Rest of your Redis functions remain the same...
 export const redisGet = async (key) => {
   if (!isRedisAvailable) return null;
   try {
@@ -103,5 +113,4 @@ export const redisPing = async () => {
   }
 };
 
-// Check if Redis is available
 export const isRedisConnected = () => isRedisAvailable;

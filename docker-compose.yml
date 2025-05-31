@@ -52,13 +52,24 @@ services:
     ports:
       - "26379:26379"
     volumes:
-      - ./config/redis-sentinel.conf:/etc/redis/sentinel.conf
-    command: redis-sentinel /etc/redis/sentinel.conf
+      - ./config/redis-sentinel.conf:/tmp/sentinel.conf:ro
+      - redis_sentinel_data:/data
+    command: >
+      sh -c "
+      cp /tmp/sentinel.conf /data/sentinel.conf &&
+      redis-sentinel /data/sentinel.conf
+      "
     depends_on:
-      - redis-master
+      redis-master:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # RabbitMQ Cluster
   rabbitmq:
@@ -173,6 +184,7 @@ services:
       - app-network
 
   # Backend Services (Multiple Instances)
+  # Backend Services (Fixed port conflicts)
   backend-1:
     build: ./backend
     container_name: backend-1
@@ -182,15 +194,17 @@ services:
       - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
       - REDIS_URL=redis://redis-master:6379
       - RABBITMQ_URL=amqp://admin:rabbitmqpw@rabbitmq:5672
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=maisonmargielabythefireplace
       - LLM_URL=http://tgi:80
       - FRONTEND_URL=http://frontend:3000
       - HF_TOKEN=${HF_TOKEN}
-      - INSTANCE_ID=backend-1
+      - INSTANCE_ID=backend-1 # ✅ Correct
     ports:
-      - "3001:3001"
+      - "3001:3001" # ✅ Unique external port
     depends_on:
       postgres-master:
         condition: service_healthy
@@ -203,6 +217,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
     restart: unless-stopped
     deploy:
       resources:
@@ -218,19 +233,21 @@ services:
     container_name: backend-2
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=3001 # ✅ Internal port stays 3001
       - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
       - REDIS_URL=redis://redis-master:6379
       - RABBITMQ_URL=amqp://admin:rabbitmqpw@rabbitmq:5672
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=maisonmargielabythefireplace
       - LLM_URL=http://tgi:80
       - FRONTEND_URL=http://frontend:3000
       - HF_TOKEN=${HF_TOKEN}
-      - INSTANCE_ID=backend-2
+      - INSTANCE_ID=backend-2 # ✅ Fixed
     ports:
-      - "3002:3001"
+      - "3002:3001" # ✅ Fixed: Different external port
     depends_on:
       postgres-master:
         condition: service_healthy
@@ -243,6 +260,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
     restart: unless-stopped
     deploy:
       resources:
@@ -258,19 +276,21 @@ services:
     container_name: backend-3
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=3001 # ✅ Internal port stays 3001
       - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - REDIS_HOST=redis-master
+      - REDIS_PORT=6379
       - REDIS_URL=redis://redis-master:6379
       - RABBITMQ_URL=amqp://admin:rabbitmqpw@rabbitmq:5672
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=maisonmargielabythefireplace
       - LLM_URL=http://tgi:80
       - FRONTEND_URL=http://frontend:3000
       - HF_TOKEN=${HF_TOKEN}
-      - INSTANCE_ID=backend-3
+      - INSTANCE_ID=backend-3 # ✅ Fixed
     ports:
-      - "3003:3001"
+      - "3003:3001" # ✅ Fixed: Different external port
     depends_on:
       postgres-master:
         condition: service_healthy
@@ -283,6 +303,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
     restart: unless-stopped
     deploy:
       resources:
@@ -293,20 +314,21 @@ services:
     networks:
       - app-network
 
-  # Frontend Services (Multiple Instances)
+  # Frontend Services (Fixed port conflicts)
   frontend-1:
     build: ./frontend
     container_name: frontend-1
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost/api
+      - NEXT_PUBLIC_API_URL=http://localhost/
       - NODE_ENV=production
     ports:
-      - "3000:3000"
+      - "3000:3000" # ✅ Unique external port
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
     restart: unless-stopped
     deploy:
       resources:
@@ -321,15 +343,16 @@ services:
     build: ./frontend
     container_name: frontend-2
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost/api
+      - NEXT_PUBLIC_API_URL=http://localhost/
       - NODE_ENV=production
     ports:
-      - "3004:3000"
+      - "3004:3000" # ✅ Fixed: Different external port
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
     restart: unless-stopped
     deploy:
       resources:
@@ -430,6 +453,7 @@ services:
 
 volumes:
   redis_master_data:
+  redis_sentinel_data:
   rabbitmq_data:
   postgres_master_data:
   postgres_replica1_data:

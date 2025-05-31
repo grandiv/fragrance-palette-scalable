@@ -7,11 +7,12 @@
   "type": "module",
   "main": "src/app.js",
   "scripts": {
-    "dev": "nodemon src/app.js",
     "start": "node src/app.js",
-    "build": "echo 'No build step needed'",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "seed": "node prisma/seed.js"
+    "dev": "nodemon src/app.js",
+    "seed": "node prisma/seed.js",
+    "db:generate": "npx prisma generate",
+    "db:push": "npx prisma db push",
+    "db:migrate": "npx prisma migrate dev"
   },
   "author": "Grandiv",
   "license": "ISC",

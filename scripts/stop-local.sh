@@ -28,8 +28,8 @@ echo -e "${YELLOW}🔄 Forcing stop of any remaining services...${NC}"
 docker-compose down
 
 # Clean up any hanging containers
-echo -e "${YELLOW}🧹 Cleaning up containers...${NC}"
-docker container prune -f >/dev/null 2>&1 || true
+# echo -e "${YELLOW}🧹 Cleaning up containers...${NC}"
+# docker container prune -f >/dev/null 2>&1 || true
 
 # Show final status
 echo -e "\n${YELLOW}📊 Final Status:${NC}"

@@ -16,11 +16,12 @@ scrape_configs:
     metrics_path: "/api/metrics"
     scrape_interval: 10s
 
-  - job_name: "nginx"
-    static_configs:
-      - targets: ["nginx:80"]
-    metrics_path: "/metrics"
-    scrape_interval: 30s
+  # Remove the nginx job since it doesn't have metrics endpoint
+  # - job_name: "nginx"
+  #   static_configs:
+  #     - targets: ["nginx:80"]
+  #   metrics_path: "/metrics"
+  #   scrape_interval: 30s
 
   - job_name: "node-exporter"
     static_configs:
