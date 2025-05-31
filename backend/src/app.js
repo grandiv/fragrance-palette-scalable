@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+// ❌ COMMENTED OUT: Rate limiting for load testing
 // import rateLimit from "express-rate-limit";
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { authMiddleware } from "./middlewares/auth.js";
@@ -18,31 +19,39 @@ import { metricsMiddleware } from "./middlewares/metrics.js";
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Security middleware
-app.use(helmet());
+// Security middleware - Relaxed for load testing
+app.use(
+  helmet({
+    crossOriginEmbedderPolicy: false, // ✅ Disable for load testing
+  })
+);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: true, // ✅ Allow all origins for load testing
     credentials: true,
   })
 );
 
-// Rate limiting
+// ❌ DISABLED: Rate limiting for load testing
 // const limiter = rateLimit({
 //   windowMs: 15 * 60 * 1000, // 15 minutes
 //   max: 100, // Limit each IP to 100 requests per windowMs
 //   message: { error: "Too many requests, please try again later" },
 // });
-
 // app.use(limiter);
-app.use(express.json({ limit: "10mb" }));
+
+app.use(express.json({ limit: "50mb" })); // ✅ Increased from 10mb
 
 // Add metrics middleware
 app.use(metricsMiddleware);
 
-// Request logging middleware
+// Request logging middleware - Simplified for load testing
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  // ✅ Only log non-health check requests to reduce overhead
+  if (!req.path.includes("/health") && !req.path.includes("/metrics")) {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  }
   next();
 });
 

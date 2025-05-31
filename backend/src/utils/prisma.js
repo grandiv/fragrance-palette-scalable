@@ -1,15 +1,15 @@
 import { PrismaClient } from "@prisma/client";
 
-// Connection configuration
+// Connection configuration - Optimized for load testing
 const connectionConfig = {
   log:
     process.env.NODE_ENV === "development"
-      ? ["query", "info", "warn", "error"]
+      ? ["error"] // ✅ Reduced logging for load testing
       : ["error"],
   errorFormat: "pretty",
 };
 
-// Validate database URLs
+// Database URLs with connection pooling optimized for load testing
 const masterUrl = process.env.DATABASE_URL_MASTER || process.env.DATABASE_URL;
 const replicaUrl =
   process.env.DATABASE_URL_REPLICA ||
@@ -36,7 +36,7 @@ export const prismaReplica = new PrismaClient({
   },
 });
 
-// Test connections on startup with better error handling
+// Test connections on startup with reduced logging
 prismaMaster
   .$connect()
   .then(() => console.log("✅ Master database connected"))
@@ -54,15 +54,19 @@ prismaReplica
     );
   });
 
-// Enhanced connection URLs with pooling
+// Enhanced connection URLs with aggressive pooling for load testing
 export const prismaPooledMaster = new PrismaClient({
   ...connectionConfig,
-  datasources: { db: { url: masterUrl } },
+  datasources: {
+    db: { url: `${masterUrl}?connection_limit=50&pool_timeout=10` },
+  },
 });
 
 export const prismaPooledReplica = new PrismaClient({
   ...connectionConfig,
-  datasources: { db: { url: replicaUrl } },
+  datasources: {
+    db: { url: `${replicaUrl}?connection_limit=50&pool_timeout=10` },
+  },
 });
 
 // Smart routing with fallback
