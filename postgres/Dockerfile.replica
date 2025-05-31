@@ -1,0 +1,14 @@
+FROM postgres:15
+
+# Copy configuration files
+COPY replica.conf /etc/postgresql/postgresql.conf
+COPY setup-replica.sh /usr/local/bin/setup-replica.sh
+COPY replica-entrypoint.sh /usr/local/bin/replica-entrypoint.sh
+
+# Make scripts executable
+RUN chmod +x /usr/local/bin/setup-replica.sh
+RUN chmod +x /usr/local/bin/replica-entrypoint.sh
+
+# Use custom entrypoint
+ENTRYPOINT ["/usr/local/bin/replica-entrypoint.sh"]
+CMD ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]

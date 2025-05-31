@@ -4,43 +4,58 @@
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-echo -e "${YELLOW}🛑 Stopping Fragrance Palette Development Environment${NC}"
+echo -e "${BLUE}🛑 Stopping Fragrance Palette Services${NC}"
 
-# Stop Docker containers
-echo -e "${YELLOW}🐳 Stopping Docker containers...${NC}"
+# Stop any running performance tests
+echo -e "${YELLOW}🔄 Stopping any running performance tests...${NC}"
+pkill -f "hey" 2>/dev/null || true
+pkill -f "newman" 2>/dev/null || true
+pkill -f "performance-test" 2>/dev/null || true
+
+# Stop all services gracefully
+echo -e "${YELLOW}📦 Stopping all Docker Compose services...${NC}"
+docker-compose stop
+
+# Give services time to shut down gracefully
+echo -e "${YELLOW}⏳ Waiting for graceful shutdown...${NC}"
+sleep 10
+
+# Force stop if needed
+echo -e "${YELLOW}🔄 Forcing stop of any remaining services...${NC}"
 docker-compose down
 
-# Kill Node.js processes
-echo -e "${YELLOW}🔧 Stopping Node.js processes...${NC}"
-pkill -f "node src/app.js" 2>/dev/null && echo -e "${GREEN}✅ Backend stopped${NC}" || echo -e "${YELLOW}ℹ️  No backend process found${NC}"
-pkill -f "npm run dev" 2>/dev/null && echo -e "${GREEN}✅ Frontend npm process stopped${NC}" || echo -e "${YELLOW}ℹ️  No frontend npm process found${NC}"
-pkill -f "next dev" 2>/dev/null && echo -e "${GREEN}✅ Next.js process stopped${NC}" || echo -e "${YELLOW}ℹ️  No Next.js process found${NC}"
+# Clean up any hanging containers
+echo -e "${YELLOW}🧹 Cleaning up containers...${NC}"
+docker container prune -f >/dev/null 2>&1 || true
 
-# Check for any remaining processes on our ports
-echo -e "${YELLOW}🔍 Checking for processes on development ports...${NC}"
+# Show final status
+echo -e "\n${YELLOW}📊 Final Status:${NC}"
+RUNNING_CONTAINERS=$(docker-compose ps -q | wc -l)
+if [ "$RUNNING_CONTAINERS" -eq 0 ]; then
+    echo -e "   ✅ All services stopped"
+else
+    echo -e "   ⚠️  $RUNNING_CONTAINERS containers still running"
+    docker-compose ps
+fi
 
-# Function to kill process on specific port
-kill_port() {
-    local port=$1
-    local service=$2
-    local pid=$(lsof -ti:$port 2>/dev/null)
-    if [ ! -z "$pid" ]; then
-        echo -e "${YELLOW}🔫 Killing $service process on port $port (PID: $pid)${NC}"
-        kill -9 $pid 2>/dev/null && echo -e "${GREEN}✅ $service stopped${NC}" || echo -e "${RED}❌ Failed to stop $service${NC}"
-    else
-        echo -e "${GREEN}✅ Port $port is free${NC}"
-    fi
-}
+# Optional operations (commented out by default)
+echo -e "\n${YELLOW}💡 Optional cleanup commands:${NC}"
+echo -e "   • Remove volumes: docker-compose down -v"
+echo -e "   • Remove images: docker-compose down --rmi all"
+echo -e "   • Clean all Docker: docker system prune -a"
+echo -e "   • Remove test data: rm -rf reports/"
 
-# Kill processes on development ports
-kill_port 3000 "Frontend"
-kill_port 3001 "Backend"
-kill_port 8080 "TGI"
-kill_port 5432 "PostgreSQL"
-kill_port 6379 "Redis"
-kill_port 5672 "RabbitMQ"
-kill_port 15672 "RabbitMQ Management"
+# Uncomment these if you want automatic cleanup
+# echo -e "${YELLOW}🗑️ Removing volumes...${NC}"
+# docker-compose down -v
 
-echo -e "${GREEN}🎉 All services stopped successfully!${NC}"
+# echo -e "${YELLOW}🧹 Cleaning up unused images...${NC}"
+# docker image prune -f
+
+echo -e "${GREEN}✅ All services stopped!${NC}"
+echo -e "${BLUE}💡 To restart: ./scripts/start-local.sh${NC}"
+
+read -rp "🔸 Press [Enter] to close this window…"

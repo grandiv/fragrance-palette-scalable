@@ -5,96 +5,102 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Store process IDs
-BACKEND_PID=""
-FRONTEND_PID=""
+echo -e "${BLUE}🚀 Starting Fragrance Palette Scalable Architecture${NC}"
 
-# Cleanup function
-# cleanup() {
-#     echo -e "\n${YELLOW}🛑 Shutting down services...${NC}"
-    
-#     # Kill backend process
-#     if [ ! -z "$BACKEND_PID" ] && kill -0 $BACKEND_PID 2>/dev/null; then
-#         echo -e "${YELLOW}🔧 Stopping backend (PID: $BACKEND_PID)...${NC}"
-#         kill -TERM $BACKEND_PID 2>/dev/null
-#         wait $BACKEND_PID 2>/dev/null
-#     fi
-    
-#     # Kill frontend process
-#     if [ ! -z "$FRONTEND_PID" ] && kill -0 $FRONTEND_PID 2>/dev/null; then
-#         echo -e "${YELLOW}🎨 Stopping frontend (PID: $FRONTEND_PID)...${NC}"
-#         kill -TERM $FRONTEND_PID 2>/dev/null
-#         wait $FRONTEND_PID 2>/dev/null
-#     fi
-    
-#     # Stop Docker containers
-#     echo -e "${YELLOW}🐳 Stopping Docker containers...${NC}"
-#     docker-compose down
-    
-#     # Kill any remaining Node.js processes (optional safety measure)
-#     echo -e "${YELLOW}🧹 Cleaning up any remaining processes...${NC}"
-#     pkill -f "node src/app.js" 2>/dev/null || true
-#     pkill -f "npm run dev" 2>/dev/null || true
-#     pkill -f "next dev" 2>/dev/null || true
-    
-#     echo -e "${GREEN}✅ All services stopped successfully!${NC}"
-#     exit 0
-# }
+# Create necessary directories
+echo -e "${YELLOW}📁 Creating configuration directories...${NC}"
+mkdir -p config scripts monitoring/grafana/{provisioning,dashboards} nginx/conf.d reports
 
-# # Set up signal handlers
-# trap cleanup SIGINT SIGTERM EXIT
+# Make scripts executable
+chmod +x scripts/*.sh
 
-echo -e "${BLUE}🚀 Starting Fragrance Palette Local Development Environment${NC}"
+# Check environment variables
+echo -e "${YELLOW}🔍 Checking environment variables...${NC}"
+if [ -z "$HF_TOKEN" ]; then
+    echo -e "${RED}❌ HF_TOKEN not set in .env file${NC}"
+    echo -e "${YELLOW}💡 Please add HF_TOKEN=your_token to .env${NC}"
+    exit 1
+fi
 
-# Start infrastructure services including monitoring
-echo -e "${YELLOW}📦 Starting infrastructure and monitoring services...${NC}"
-docker-compose up -d --build
+if [ -z "$JWT_SECRET" ]; then
+    echo -e "${YELLOW}⚠️  JWT_SECRET not set, using default${NC}"
+    export JWT_SECRET="your-super-secret-jwt-key-here"
+fi
 
-# Wait for services to be ready
-echo -e "${YELLOW}⏳ Waiting for services to be ready...${NC}"
-sleep 45
+# Build Docker images first
+echo -e "${YELLOW}🔨 Building Docker images...${NC}"
+docker-compose build
 
-# Check if services are ready
-echo -e "${YELLOW}🔍 Checking service health...${NC}"
-docker-compose ps
+# Start infrastructure services first
+echo -e "${YELLOW}📦 Starting infrastructure services...${NC}"
+docker-compose up -d postgres-master redis-master rabbitmq
 
-# Set up database
-echo -e "${YELLOW}🗄️ Setting up database...${NC}"
+# Wait for infrastructure
+echo -e "${YELLOW}⏳ Waiting for infrastructure services...${NC}"
+sleep 30
+
+# Start replica databases
+echo -e "${YELLOW}📦 Starting replica databases...${NC}"
+docker-compose up -d postgres-replica-1 postgres-replica-2
+
+# Wait for replicas
+echo -e "${YELLOW}⏳ Waiting for replica databases...${NC}"
+sleep 60
+
+# Setup database schema
+echo -e "${YELLOW}🗄️ Setting up database schema...${NC}"
 cd backend
 npm install
 npx prisma generate
 npx prisma db push
 npm run seed
+cd ..
 
-# Start backend in background
-echo -e "${YELLOW}🔧 Starting backend...${NC}"
-npm start &
-BACKEND_PID=$!
-echo -e "${GREEN}Backend started with PID: $BACKEND_PID${NC}"
+# Start application services
+echo -e "${YELLOW}📦 Starting application services...${NC}"
+docker-compose up -d backend-1 backend-2 backend-3 frontend-1 frontend-2
 
-# Start frontend
-echo -e "${YELLOW}🎨 Starting frontend...${NC}"
-cd ../frontend
-npm install
-npm run dev &
-FRONTEND_PID=$!
-echo -e "${GREEN}Frontend started with PID: $FRONTEND_PID${NC}"
+# Wait for applications
+echo -e "${YELLOW}⏳ Waiting for application services...${NC}"
+sleep 45
+
+# Start load balancer
+echo -e "${YELLOW}⚖️ Starting load balancer...${NC}"
+docker-compose up -d nginx
+
+# Start monitoring
+echo -e "${YELLOW}📊 Starting monitoring services...${NC}"
+docker-compose up -d prometheus grafana node-exporter
+
+# Start TGI (resource intensive, start last)
+echo -e "${YELLOW}🤖 Starting AI services...${NC}"
+docker-compose up -d tgi
+
+# Wait for everything to stabilize
+echo -e "${YELLOW}⏳ Final stabilization wait...${NC}"
+sleep 30
 
 echo -e "${GREEN}✅ All services started!${NC}"
-echo -e "${BLUE}📱 Frontend: http://localhost:3000${NC}"
-echo -e "${BLUE}🔧 Backend: http://localhost:3001${NC}"
-echo -e "${BLUE} Health Check: http://localhost:3001/api/health${NC}"
-echo -e "${BLUE} Metrics: http://localhost:3001/api/metrics${NC}"
-echo -e "${BLUE} Prometheus: http://localhost:9090${NC}"
-echo -e "${BLUE} Grafana: http://localhost:3030 (admin/admin123)${NC}"
-echo -e "${BLUE}🔀 Load Balancer: http://localhost:80${NC}"
-echo -e "${BLUE}🐰 RabbitMQ Management: http://localhost:15672 (admin/admin123)${NC}"
-echo -e "${BLUE}📊 Redis: localhost:6379${NC}"
-echo -e "${BLUE}🤖 TGI: http://localhost:8080${NC}"
+echo -e "${BLUE}📊 Access points:${NC}"
+echo -e "   • 🌐 Main Application: http://localhost"
+echo -e "   • 🔧 Backend APIs: http://localhost:3001, :3002, :3003"
+echo -e "   • 🎨 Frontend: http://localhost:3000, :3004"
+echo -e "   • 🤖 TGI API: http://localhost:8080"
+echo -e "   • 🐰 RabbitMQ: http://localhost:15672 (admin/rabbitmqpw)"
+echo -e "   • 📊 Prometheus: http://localhost:9090"
+echo -e "   • 📈 Grafana: http://localhost:3030 (admin/admin123)"
 
-echo -e "\n${YELLOW}💡 Press Ctrl+C to stop all services${NC}"
+echo -e "\n${YELLOW}💡 Useful commands:${NC}"
+echo -e "   • Check status: ./scripts/status-local.sh"
+echo -e "   • Performance test: ./scripts/performance-test.sh"
+echo -e "   • Load test: ./scripts/load-test.sh"
+echo -e "   • Monitor performance: ./scripts/monitor-performance.sh"
+echo -e "   • View logs: docker-compose logs -f [service-name]"
+echo -e "   • Stop services: ./scripts/stop-local.sh"
 
-# Keep script running and wait for signals
-wait $BACKEND_PID $FRONTEND_PID
+echo -e "\n${GREEN}🧪 Ready for performance testing!${NC}"
+echo -e "${BLUE}Run ./scripts/performance-test.sh to start comprehensive testing${NC}"
+
+read -rp "🔸 Press [Enter] to close this window…"

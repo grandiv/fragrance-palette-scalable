@@ -5,64 +5,120 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${BLUE}📊 Fragrance Palette Service Status${NC}"
-echo "=================================="
+echo -e "${BLUE}📊 Fragrance Palette Status Check${NC}"
 
-# Function to check port status
-check_port() {
-    local port=$1
-    local service=$2
-    local url=$3
-    
-    if lsof -i:$port >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ $service (Port $port): RUNNING${NC}"
-        if [ ! -z "$url" ]; then
-            echo -e "   🔗 URL: $url"
-        fi
-    else
-        echo -e "${RED}❌ $service (Port $port): STOPPED${NC}"
-    fi
-}
-
-# Function to check HTTP endpoint
-check_http() {
-    local url=$1
-    local service=$2
-    
-    if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q "200\|302"; then
-        echo -e "${GREEN}✅ $service HTTP: HEALTHY${NC}"
-    else
-        echo -e "${RED}❌ $service HTTP: UNHEALTHY${NC}"
-    fi
-}
-
-echo -e "\n${YELLOW}🐳 Docker Containers:${NC}"
+# Check Docker Compose services
+echo -e "\n${YELLOW}🐳 Docker Compose Services:${NC}"
 docker-compose ps
 
-echo -e "\n${YELLOW}📡 Port Status:${NC}"
-check_port 3000 "Frontend (Next.js)" "http://localhost:3000"
-check_port 3001 "Backend (Express)" "http://localhost:3001"
-check_port 8080 "TGI (AI Service)" "http://localhost:8080"
-check_port 5432 "PostgreSQL Master" ""
-check_port 5433 "PostgreSQL Replica" ""
-check_port 6379 "Redis" ""
-check_port 5672 "RabbitMQ" ""
-check_port 15672 "RabbitMQ Management" "http://localhost:15672"
-check_port 80 "NGINX Load Balancer" "http://localhost:80"
+# Check service health
+echo -e "\n${YELLOW}🏥 Service Health:${NC}"
 
-echo -e "\n${YELLOW}🏥 Health Checks:${NC}"
-check_http "http://localhost:3001/api/health" "Backend API"
-check_http "http://localhost:3000" "Frontend"
-check_http "http://localhost:15672" "RabbitMQ Management"
+check_service() {
+    local url=$1
+    local name=$2
+    local response_code=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)
+    if echo "$response_code" | grep -q "200\|201\|301\|302"; then
+        echo -e "   ✅ $name: UP (HTTP $response_code)"
+    else
+        echo -e "   ❌ $name: DOWN (HTTP $response_code)"
+    fi
+}
 
-echo -e "\n${YELLOW}🔍 Process Information:${NC}"
-echo "Node.js processes:"
-ps aux | grep -E "(node|npm)" | grep -v grep || echo "No Node.js processes found"
+# Load balancer and applications
+check_service "http://localhost" "NGINX Load Balancer"
+check_service "http://localhost/api/health" "Load Balanced Backend"
+
+# Individual backend instances
+check_service "http://localhost:3001/api/health" "Backend-1"
+check_service "http://localhost:3002/api/health" "Backend-2"
+check_service "http://localhost:3003/api/health" "Backend-3"
+
+# Frontend instances
+check_service "http://localhost:3000" "Frontend-1"
+check_service "http://localhost:3004" "Frontend-2"
+
+# Infrastructure services
+check_service "http://localhost:15672" "RabbitMQ Management"
+check_service "http://localhost:9090" "Prometheus"
+check_service "http://localhost:3030" "Grafana"
+check_service "http://localhost:8080/health" "TGI (AI Service)"
+
+echo -e "\n${YELLOW}💾 Database Status:${NC}"
+# Check PostgreSQL Master
+if docker-compose exec -T postgres-master pg_isready -U postgres >/dev/null 2>&1; then
+    echo -e "   ✅ PostgreSQL Master: UP"
+    # Check database exists
+    if docker-compose exec -T postgres-master psql -U postgres -d fragrances -c "SELECT 1;" >/dev/null 2>&1; then
+        echo -e "   ✅ Fragrances Database: ACCESSIBLE"
+    else
+        echo -e "   ❌ Fragrances Database: NOT ACCESSIBLE"
+    fi
+else
+    echo -e "   ❌ PostgreSQL Master: DOWN"
+fi
+
+# Check PostgreSQL Replicas
+if docker-compose exec -T postgres-replica-1 pg_isready -U postgres >/dev/null 2>&1; then
+    echo -e "   ✅ PostgreSQL Replica-1: UP"
+    # Check replication status
+    if docker-compose exec -T postgres-replica-1 psql -U postgres -d fragrances -c "SELECT pg_is_in_recovery();" >/dev/null 2>&1; then
+        echo -e "   ✅ Replica-1: IN RECOVERY MODE"
+    fi
+else
+    echo -e "   ❌ PostgreSQL Replica-1: DOWN"
+fi
+
+if docker-compose exec -T postgres-replica-2 pg_isready -U postgres >/dev/null 2>&1; then
+    echo -e "   ✅ PostgreSQL Replica-2: UP"
+    # Check replication status
+    if docker-compose exec -T postgres-replica-2 psql -U postgres -d fragrances -c "SELECT pg_is_in_recovery();" >/dev/null 2>&1; then
+        echo -e "   ✅ Replica-2: IN RECOVERY MODE"
+    fi
+else
+    echo -e "   ❌ PostgreSQL Replica-2: DOWN"
+fi
+
+# Check Redis
+if docker-compose exec -T redis-master redis-cli ping >/dev/null 2>&1; then
+    echo -e "   ✅ Redis: UP"
+else
+    echo -e "   ❌ Redis: DOWN"
+fi
+
+# Show replication status
+echo -e "\n${YELLOW}🔄 Replication Status:${NC}"
+REPLICATION_COUNT=$(docker-compose exec -T postgres-master psql -U postgres -t -c "SELECT count(*) FROM pg_stat_replication;" 2>/dev/null | tr -d ' \n' || echo "0")
+if [ "$REPLICATION_COUNT" -gt 0 ]; then
+    echo -e "   ✅ Active Replicas: $REPLICATION_COUNT"
+    docker-compose exec -T postgres-master psql -U postgres -c "SELECT client_addr, state, sync_state FROM pg_stat_replication;" 2>/dev/null || true
+else
+    echo -e "   ⚠️  No active replicas detected"
+fi
+
+# Show resource usage
+echo -e "\n${YELLOW}📈 Resource Usage:${NC}"
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}" | head -15
+
+# Show recent logs for any failed services
+echo -e "\n${YELLOW}📜 Recent Errors (if any):${NC}"
+docker-compose logs --tail=5 2>/dev/null | grep -i "error\|fail\|exception" | tail -5 || echo "   No recent errors found"
 
 echo -e "\n${BLUE}📋 Quick Commands:${NC}"
-echo "• Start all services: ./scripts/start-local.sh"
-echo "• Stop all services: ./scripts/stop-local.sh"
-echo "• Check status: ./scripts/status-local.sh"
-echo "• Test components: ./scripts/test-components.sh"
+echo -e "   • Start all: ./scripts/start-local.sh"
+echo -e "   • Stop all: ./scripts/stop-local.sh"
+echo -e "   • Performance test: ./scripts/performance-test.sh"
+echo -e "   • Load test: ./scripts/load-test.sh"
+echo -e "   • View logs: docker-compose logs -f [service-name]"
+echo -e "   • Scale backend: docker-compose up -d --scale backend-1=2"
+echo -e "   • Monitor real-time: ./scripts/monitor-performance.sh"
+
+echo -e "\n${BLUE}🧪 Performance Testing:${NC}"
+echo -e "   • Basic performance: ./scripts/performance-test.sh"
+echo -e "   • Heavy load test: ./scripts/load-test.sh"
+echo -e "   • Stress test: ./scripts/stress-test.sh"
+echo -e "   • Scalability test: ./scripts/scalability-test.sh"
+
+read -rp "🔸 Press [Enter] to close this window…"

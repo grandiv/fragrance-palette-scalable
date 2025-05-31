@@ -1,108 +1,5 @@
-version: "3.8"
-
 services:
-  # -------------------------------------------
-  # Application Services
-  # -------------------------------------------
-  nginx:
-    image: nginx:1.25-alpine
-    container_name: fragrance_nginx
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - frontend
-      - backend
-    networks:
-      - app-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "nginx", "-t"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: fragrance_frontend
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost/api
-      - NODE_ENV=production
-    expose:
-      - "3000"
-    networks:
-      - app-network
-    restart: unless-stopped
-    depends_on:
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile # Ensure Dockerfile runs 'prisma generate' as non-root or fixes permissions
-    container_name: fragrance_backend
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
-      # DATABASE_URL is crucial for Prisma CLI tools like 'db push' and 'generate'
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgresmaster}@postgres-master:5432/${POSTGRES_DB:-fragrances}?sslmode=prefer
-      - DATABASE_URL_MASTER=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgresmaster}@postgres-master:5432/${POSTGRES_DB:-fragrances}?sslmode=prefer
-      - DATABASE_URL_REPLICA=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgresmaster}@postgres-replica1:5432/${POSTGRES_DB:-fragrances}?sslmode=prefer
-      - REDIS_URL=redis://redis:6379
-      # - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - RABBITMQ_URL=amqp://${RABBITMQ_DEFAULT_USER:-admin}:${RABBITMQ_DEFAULT_PASS:-rabbitmqpw}@rabbitmq:5672
-      - JWT_SECRET=${JWT_SECRET:-yourFallbackJwtSecretKey123!@#}
-      - LLM_URL=http://tgi:80
-      - FRONTEND_URL=http://frontend:3000
-      - HF_TOKEN=${HF_TOKEN}
-    expose:
-      - "3001"
-    depends_on:
-      postgres-master:
-        condition: service_healthy
-      postgres-replica1:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      tgi:
-        condition: service_healthy
-    networks:
-      - app-network
-    restart: unless-stopped
-    command: >
-      sh -c "
-        echo 'Backend: Waiting a bit for services to stabilize further...' &&
-        sleep 10 &&
-        echo 'Backend: Applying database migrations (db push)...' &&
-        export DATABASE_URL=\"postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgresmaster}@postgres-master:5432/${POSTGRES_DB:-fragrances}?sslmode=prefer\" &&
-        npx prisma db push --force-reset &&
-        echo 'Backend: Seeding database...' &&
-        npm run seed &&
-        echo 'Backend: Starting application...' &&
-        npm start
-      "
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s # Increased to allow for db push and seed
-
-  # -------------------------------------------
-  # AI Service
-  # -------------------------------------------
+  # Text Generation Inference
   tgi:
     image: ghcr.io/huggingface/text-generation-inference:latest
     runtime: nvidia
@@ -122,235 +19,429 @@ services:
     networks:
       - app-network
     restart: unless-stopped
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 300s
 
-  # -------------------------------------------
-  # Data Stores & Message Queue
-  # -------------------------------------------
-  postgres-master:
-    image: postgres:15-alpine
-    container_name: fragrance_postgres_master
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB:-fragrances}
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgresmaster}
-      - POSTGRES_REPLICATION_USER=${POSTGRES_REPLICATION_USER:-replicator}
-      - POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicatorpass}
-      - PGDATA=/var/lib/postgresql/data/pgdata
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_master_data:/var/lib/postgresql/data/pgdata
-      - ./scripts/setup-master.sh:/docker-entrypoint-initdb.d/setup-master.sh
-    networks:
-      - app-network
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h localhost",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  postgres-replica1:
-    image: postgres:15-alpine
-    container_name: fragrance_postgres_replica1
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgresmaster}
-      - PGUSER=${POSTGRES_REPLICATION_USER:-replicator}
-      - PGPASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicatorpass}
-      - PGDATA=/var/lib/postgresql/data/pgdata
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_replica1_data:/var/lib/postgresql/data/pgdata
-    depends_on:
-      postgres-master:
-        condition: service_healthy
-    command: >
-      bash -c "
-        set -e;
-        echo 'Replica: Current user: $$(id -u):$$(id -g)';
-        echo 'Replica: Ensuring PGDATA directory ($$PGDATA) exists and has correct permissions...';
-        
-        # First, ensure the directory exists as root
-        mkdir -p $$PGDATA;
-        
-        # Change ownership to postgres user before attempting chmod
-        chown -R postgres:postgres $$PGDATA;
-        
-        # Now set permissions as postgres user
-        gosu postgres chmod 0700 $$PGDATA;
-        
-        echo 'Replica: Waiting for master (postgres-master:5432) to be fully available...';
-        until gosu postgres pg_isready -h postgres-master -p 5432 -U $$PGUSER; do
-          echo 'Replica: Master is unavailable - sleeping';
-          sleep 2;
-        done;
-        echo 'Replica: Master is ready. Checking if data directory ($$PGDATA) is empty...';
-        if [ -z \"$$(ls -A $$PGDATA)\" ]; then
-          echo 'Replica: Data directory is empty. Performing base backup as postgres user...';
-          gosu postgres rm -rf $$PGDATA/*;
-          echo 'Replica: Running pg_basebackup...';
-          gosu postgres pg_basebackup -h postgres-master -p 5432 -D $$PGDATA -U $$PGUSER -vP -w --wal-method=stream;
-          echo 'Replica: Base backup complete. Configuring replica...';
-          gosu postgres bash -c \"cat > $$PGDATA/postgresql.auto.conf <<EOF
-      primary_conninfo = 'host=postgres-master port=5432 user=${POSTGRES_REPLICATION_USER:-replicator} password=${POSTGRES_REPLICATION_PASSWORD:-replicatorpass} sslmode=prefer application_name=postgres_replica1'
-      primary_slot_name = 'replica_slot_1'
-      EOF\";
-          gosu postgres touch $$PGDATA/standby.signal;
-          gosu postgres chmod 0700 $$PGDATA;
-          echo 'Replica: Configuration complete.';
-        else
-          echo 'Replica: Data directory not empty, assuming replica is already configured or restarting.';
-        fi;
-        echo 'Replica: Starting PostgreSQL as postgres user...';
-        exec gosu postgres postgres -D $$PGDATA
-      "
-    networks:
-      - app-network
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "gosu postgres pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h localhost && gosu postgres psql -U $$POSTGRES_USER -d $$POSTGRES_DB -h localhost -c 'SELECT pg_is_in_recovery();' | grep 't'",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-
-  redis:
+  # Redis Cluster for High Availability
+  redis-master:
     image: redis:7-alpine
-    container_name: fragrance_redis
+    container_name: redis-master
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    networks:
-      - app-network
-    restart: unless-stopped
+      - redis_master_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - app-network
 
+  redis-sentinel:
+    image: redis:7-alpine
+    container_name: redis-sentinel
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./config/redis-sentinel.conf:/etc/redis/sentinel.conf
+    command: redis-sentinel /etc/redis/sentinel.conf
+    depends_on:
+      - redis-master
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # RabbitMQ Cluster
   rabbitmq:
-    image: rabbitmq:3.12-management-alpine
-    container_name: fragrance_rabbitmq
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    hostname: rabbitmq
     ports:
       - "5672:5672"
       - "15672:15672"
     environment:
-      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER:-admin}
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS:-rabbitmqpw}
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: rabbitmqpw
+      RABBITMQ_ERLANG_COOKIE: "SWQOKODSQALRPCLNMEQG"
+      RABBITMQ_DEFAULT_VHOST: "/"
+      # Remove the deprecated RABBITMQ_VM_MEMORY_HIGH_WATERMARK
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq/
-    networks:
-      - app-network
-    restart: unless-stopped
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./config/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     healthcheck:
-      test: ["CMD", "rabbitmqctl", "status"]
+      test: rabbitmq-diagnostics -q ping
       interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - app-network
 
-  # -------------------------------------------
-  # Monitoring Services
-  # -------------------------------------------
+  # PostgreSQL Master with Optimized Configuration
+  # PostgreSQL Master with Optimized Configuration
+  # PostgreSQL Master
+  postgres-master:
+    image: postgres:15
+    container_name: postgres-master
+    environment:
+      POSTGRES_DB: fragrances
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgresmaster
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: replicator123
+      PGUSER: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_master_data:/var/lib/postgresql/data
+      - ./config/postgres-master.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./scripts/init-master.sh:/docker-entrypoint-initdb.d/01-init-master.sh:ro
+    command: >
+      postgres 
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fragrances"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # PostgreSQL Replica 1
+  # PostgreSQL Replica 1
+  postgres-replica-1:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile.replica
+    container_name: postgres-replica-1
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgresmaster
+      PGUSER: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_replica1_data:/var/lib/postgresql/data
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # PostgreSQL Replica 2
+  postgres-replica-2:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile.replica
+    container_name: postgres-replica-2
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgresmaster
+      PGUSER: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_replica2_data:/var/lib/postgresql/data
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Backend Services (Multiple Instances)
+  backend-1:
+    build: ./backend
+    container_name: backend-1
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
+      - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
+      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - REDIS_URL=redis://redis-master:6379
+      - RABBITMQ_URL=amqp://admin:rabbitmqpw@rabbitmq:5672
+      - JWT_SECRET=${JWT_SECRET}
+      - LLM_URL=http://tgi:80
+      - FRONTEND_URL=http://frontend:3000
+      - HF_TOKEN=${HF_TOKEN}
+      - INSTANCE_ID=backend-1
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - app-network
+
+  backend-2:
+    build: ./backend
+    container_name: backend-2
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
+      - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
+      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - REDIS_URL=redis://redis-master:6379
+      - RABBITMQ_URL=amqp://admin:rabbitmqpw@rabbitmq:5672
+      - JWT_SECRET=${JWT_SECRET}
+      - LLM_URL=http://tgi:80
+      - FRONTEND_URL=http://frontend:3000
+      - HF_TOKEN=${HF_TOKEN}
+      - INSTANCE_ID=backend-2
+    ports:
+      - "3002:3001"
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - app-network
+
+  backend-3:
+    build: ./backend
+    container_name: backend-3
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
+      - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
+      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - REDIS_URL=redis://redis-master:6379
+      - RABBITMQ_URL=amqp://admin:rabbitmqpw@rabbitmq:5672
+      - JWT_SECRET=${JWT_SECRET}
+      - LLM_URL=http://tgi:80
+      - FRONTEND_URL=http://frontend:3000
+      - HF_TOKEN=${HF_TOKEN}
+      - INSTANCE_ID=backend-3
+    ports:
+      - "3003:3001"
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - app-network
+
+  # Frontend Services (Multiple Instances)
+  frontend-1:
+    build: ./frontend
+    container_name: frontend-1
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost/api
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - app-network
+
+  frontend-2:
+    build: ./frontend
+    container_name: frontend-2
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost/api
+      - NODE_ENV=production
+    ports:
+      - "3004:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - app-network
+
+  # NGINX Load Balancer with Advanced Configuration
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-lb
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_cache:/var/cache/nginx
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend-1
+      - backend-2
+      - backend-3
+      - frontend-1
+      - frontend-2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Monitoring Stack
   prometheus:
-    image: prom/prometheus:v2.47.2
-    container_name: fragrance_prometheus
+    image: prom/prometheus:latest
+    container_name: prometheus
     ports:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
-      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
-      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--storage.tsdb.retention.time=15d"
       - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+    restart: unless-stopped
     networks:
       - app-network
-    restart: unless-stopped
-    depends_on:
-      - backend
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--quiet",
-          "--tries=1",
-          "--spider",
-          "http://localhost:9090/-/healthy",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   grafana:
-    image: grafana/grafana:10.2.2
-    container_name: fragrance_grafana
+    image: grafana/grafana:latest
+    container_name: grafana
     ports:
       - "3030:3000"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning/:/etc/grafana/provisioning/:ro
-      - ./monitoring/grafana/dashboards/:/var/lib/grafana/dashboards/:ro
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
       - GF_USERS_ALLOW_SIGN_UP=false
-    networks:
-      - app-network
-    restart: unless-stopped
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
     depends_on:
       - prometheus
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--quiet",
-          "--tries=1",
-          "--spider",
-          "http://localhost:3000/api/health",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Node Exporter for System Metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.rootfs=/rootfs"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    restart: unless-stopped
+    networks:
+      - app-network
 
 volumes:
+  redis_master_data:
+  rabbitmq_data:
   postgres_master_data:
   postgres_replica1_data:
-  redis_data:
-  rabbitmq_data:
+  postgres_replica2_data:
   prometheus_data:
   grafana_data:
-  tgi_models:
+  nginx_cache:
+  nginx_logs:
 
 networks:
   app-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
