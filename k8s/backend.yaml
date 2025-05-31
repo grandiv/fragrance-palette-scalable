@@ -1,8 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: backend
+  name: backend-deployment
   namespace: fragrance-palette
+  labels:
+    app: backend
 spec:
   replicas: 3
   selector:
@@ -13,77 +15,121 @@ spec:
       labels:
         app: backend
     spec:
-      containers:
-        - name: backend
-          image: vidnarg/fragrance-palette-backend:latest
-          ports:
-            - containerPort: 3001
+      initContainers:
+        - name: wait-for-db
+          image: postgres:15-alpine
           env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: app-secrets
-                  key: database-url
             - name: DATABASE_URL_MASTER
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
-                  key: database-url
+                  name: database-secret
+                  key: master-url
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Waiting for PostgreSQL to be ready..."
+              until pg_isready -h postgres-master-service -p 5432 -U postgres; do
+                echo "PostgreSQL is unavailable - sleeping"
+                sleep 5
+              done
+              echo "PostgreSQL is ready"
+        - name: db-setup
+          image: fragrance-backend:latest
+          env:
+            - name: DATABASE_URL_MASTER
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: master-url
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Setting up database..."
+              npx prisma generate
+              npx prisma db push --force-reset
+              npm run seed
+              echo "Database setup complete"
+      containers:
+        - name: backend
+          image: fragrance-backend:latest
+          imagePullPolicy: Never # Use local image from Docker Desktop
+          ports:
+            - containerPort: 3001
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3001"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: master-url
+            - name: DATABASE_URL_MASTER
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: master-url
             - name: DATABASE_URL_REPLICA
-              value: "postgresql://postgres:postgresmaster@postgres-replica:5432/fragrances"
-            - name: REDIS_HOST
-              value: redis
-            - name: REDIS_PORT
-              value: "6379"
-            - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: redis-secret
-                  key: password
+                  name: database-secret
+                  key: replica-url
+            - name: REDIS_URL
+              value: "redis://redis-service:6379"
             - name: RABBITMQ_URL
-              value: "amqp://admin:$(RABBITMQ_PASSWORD)@rabbitmq:5672"
-            - name: RABBITMQ_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: rabbitmq-secret
-                  key: password
+              value: "amqp://admin:admin123@rabbitmq-service:5672"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
+                  name: app-secret
                   key: jwt-secret
             - name: LLM_URL
-              value: "http://text-generation-inference:8080"
-            - name: NODE_ENV
-              value: "production"
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "250m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
+              value: "http://tgi-service:80"
+            - name: FRONTEND_URL
+              value: "http://frontend-service:3000"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+            initialDelaySeconds: 90
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /api/health
               port: 3001
-            initialDelaySeconds: 10
+            initialDelaySeconds: 60
             periodSeconds: 5
-          livenessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
             httpGet:
               path: /api/health
               port: 3001
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18 # Allow 3 minutes for startup
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: backend
+  name: backend-service
   namespace: fragrance-palette
 spec:
   selector:
     app: backend
   ports:
-    - port: 80
+    - protocol: TCP
+      port: 3001
       targetPort: 3001
+  type: ClusterIP

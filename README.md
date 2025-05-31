@@ -42,3 +42,8 @@ Home perfumers and fragrance hobbyists often find it challenging to create basic
    - `.env` in `backend` folder containing `DATABASE_URL`, `DATABASE_URL_MASTER`, `DATABASE_URL_REPLICA`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `JWT_SECRET`, `LLM_URL`, `PORT`, `RABBITMQ_URL`, `REDIS_URL`, and `FRONTEND_URL`
 3. To check the status of the services, run `./scripts/status-local.sh`
 4. To stop the services run `./scripts/stop-local.sh`
+
+### TODO:
+
+1. Orchestrate in Kubernetes
+2. Making sure webservers and replicas are working

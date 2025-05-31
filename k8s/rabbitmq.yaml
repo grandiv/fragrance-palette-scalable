@@ -1,8 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rabbitmq
-  namespace: fragrance-palette
+  name: rabbitmq-deployment
+  labels:
+    app: rabbitmq
 spec:
   replicas: 1
   selector:
@@ -21,15 +22,19 @@ spec:
             - containerPort: 15672
           env:
             - name: RABBITMQ_DEFAULT_USER
-              value: admin
+              value: "admin"
             - name: RABBITMQ_DEFAULT_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: rabbitmq-secret
-                  key: password
+              value: "admin123"
           volumeMounts:
             - name: rabbitmq-storage
               mountPath: /var/lib/rabbitmq
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "400m"
       volumes:
         - name: rabbitmq-storage
           persistentVolumeClaim:
@@ -38,27 +43,28 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: rabbitmq
-  namespace: fragrance-palette
+  name: rabbitmq-service
 spec:
   selector:
     app: rabbitmq
   ports:
     - name: amqp
+      protocol: TCP
       port: 5672
       targetPort: 5672
     - name: management
+      protocol: TCP
       port: 15672
       targetPort: 15672
+  type: ClusterIP
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: rabbitmq-pvc
-  namespace: fragrance-palette
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 5Gi
+      storage: 2Gi

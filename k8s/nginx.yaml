@@ -1,9 +1,7 @@
-# k8s/nginx.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nginx-config
-  namespace: fragrance-palette
 data:
   nginx.conf: |
     events {
@@ -11,104 +9,45 @@ data:
     }
 
     http {
-        upstream backend {
+        upstream backend_servers {
             least_conn;
-            server backend:80 max_fails=3 fail_timeout=30s;
+            server backend-service:3001 max_fails=3 fail_timeout=30s;
         }
-
-        upstream frontend {
-            least_conn;
-            server frontend:80 max_fails=3 fail_timeout=30s;
+        
+        upstream frontend_servers {
+            server frontend-service:3000;
         }
-
-        # Rate limiting zones
-        limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
-        limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/s;
-        limit_req_zone $binary_remote_addr zone=generate:10m rate=2r/s;
-
-        # Caching
-        proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=static_cache:10m max_size=1g inactive=60m;
-
+        
+        limit_req_zone $binary_remote_addr zone=api:10m rate=100r/s;
+        limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/s;
+        
         server {
             listen 80;
-            server_name localhost;
-
-            # Security headers
-            add_header X-Frame-Options DENY;
-            add_header X-Content-Type-Options nosniff;
-            add_header X-XSS-Protection "1; mode=block";
-
-            # Compression
-            gzip on;
-            gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;
-
-            # Static assets caching
-            location /_next/static/ {
-                proxy_pass http://frontend;
-                proxy_cache static_cache;
-                proxy_cache_valid 200 1h;
-                add_header X-Cache-Status $upstream_cache_status;
-                expires 1y;
-                add_header Cache-Control "public, immutable";
-            }
-
-            # API routes with specific rate limiting
-            location /api/auth/ {
-                proxy_pass http://backend;
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto $scheme;
-                
-                limit_req zone=auth burst=10 nodelay;
-            }
-
-            location /api/formulas/generate {
-                proxy_pass http://backend;
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto $scheme;
-                
-                limit_req zone=generate burst=5 nodelay;
-                proxy_read_timeout 300s;
-                proxy_connect_timeout 60s;
-                proxy_send_timeout 60s;
-            }
-
-            location /api/ {
-                proxy_pass http://backend;
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto $scheme;
-                
-                limit_req zone=api burst=20 nodelay;
-            }
-
-            # Frontend routes
+            
             location / {
-                proxy_pass http://frontend;
+                proxy_pass http://frontend_servers;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
             }
-
-            # Health checks
-            location /health {
-                access_log off;
-                return 200 "healthy\n";
-                add_header Content-Type text/plain;
+            
+            location /api/ {
+                limit_req zone=api burst=200 nodelay;
+                proxy_pass http://backend_servers;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
             }
-
-            # Monitoring endpoints
-            location /metrics {
-                proxy_pass http://backend/api/metrics;
-                allow 10.0.0.0/8;
-                allow 172.16.0.0/12;
-                allow 192.168.0.0/16;
-                deny all;
+            
+            location /api/auth/ {
+                limit_req zone=auth burst=20 nodelay;
+                proxy_pass http://backend_servers;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
             }
         }
     }
@@ -116,8 +55,9 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx
-  namespace: fragrance-palette
+  name: nginx-deployment
+  labels:
+    app: nginx
 spec:
   replicas: 2
   selector:
@@ -139,23 +79,11 @@ spec:
               subPath: nginx.conf
           resources:
             requests:
-              memory: "64Mi"
+              memory: "128Mi"
               cpu: "100m"
             limits:
-              memory: "128Mi"
+              memory: "256Mi"
               cpu: "200m"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 80
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 80
-            initialDelaySeconds: 10
-            periodSeconds: 30
       volumes:
         - name: nginx-config
           configMap:
@@ -164,12 +92,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: nginx
-  namespace: fragrance-palette
+  name: nginx-service
 spec:
   selector:
     app: nginx
   ports:
-    - port: 80
+    - protocol: TCP
+      port: 80
       targetPort: 80
   type: LoadBalancer

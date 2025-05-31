@@ -61,7 +61,8 @@ export default function Generate() {
       setTaskId(data.taskId);
       pollTaskStatus(data.taskId);
     } catch (err) {
-      setError(err.response?.data?.error || "Failed to generate formula");
+      setError("Failed to generate formula");
+      console.log(err);
       setIsLoading(false);
     }
   };

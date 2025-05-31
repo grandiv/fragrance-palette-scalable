@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 
@@ -45,30 +45,39 @@ export default function MyFormulas() {
   const router = useRouter();
 
   // Define fetchFormulas function
-  const fetchFormulas = async (page: number = 1) => {
-    try {
-      setIsLoading(true);
-      setError(null);
+  const fetchFormulas = useCallback(
+    async (page: number = 1) => {
+      try {
+        setIsLoading(true);
+        setError(null);
 
-      const response = await api.formulas.getUserFormulas(page, 10);
-      const data: FormulasResponse = response.data;
+        const response = await api.formulas.getUserFormulas(page, 10);
+        const data: FormulasResponse = response.data;
 
-      setFormulas(data.formulas);
-      setPagination(data.pagination);
-    } catch (err) {
-      console.error("Failed to fetch formulas:", err);
-      setError(
-        err.response?.data?.error || err.message || "Failed to fetch formulas"
-      );
+        setFormulas(data.formulas);
+        setPagination(data.pagination);
+      } catch (err) {
+        console.error("Failed to fetch formulas:", err);
+        setError("Failed to fetch formulas");
 
-      // If unauthorized, redirect to login
-      if (err.response?.status === 401) {
-        router.push("/login");
+        // If unauthorized, redirect to login
+        if (
+          err &&
+          typeof err === "object" &&
+          "response" in err &&
+          err.response &&
+          typeof err.response === "object" &&
+          "status" in err.response &&
+          err.response.status === 401
+        ) {
+          router.push("/login");
+        }
+      } finally {
+        setIsLoading(false);
       }
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    },
+    [router]
+  );
 
   // Fixed useEffect without fetchFormulas in dependency array
   useEffect(() => {
@@ -80,7 +89,7 @@ export default function MyFormulas() {
 
     // Call fetchFormulas directly
     fetchFormulas();
-  }, [user, token, router]); // Removed fetchFormulas from dependencies
+  }, [user, token, router, fetchFormulas]);
 
   const handlePageChange = (newPage: number) => {
     fetchFormulas(newPage);
