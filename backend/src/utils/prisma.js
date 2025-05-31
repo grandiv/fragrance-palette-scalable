@@ -1,71 +1,69 @@
 import { PrismaClient } from "@prisma/client";
 
-// Master database for writes
-export const prismaMaster = new PrismaClient({
-  datasources: {
-    db: {
-      url: process.env.DATABASE_URL_MASTER || process.env.DATABASE_URL,
-    },
-  },
+// Connection configuration
+const connectionConfig = {
   log:
     process.env.NODE_ENV === "development"
       ? ["query", "info", "warn", "error"]
       : ["error"],
+  errorFormat: "pretty",
+};
+
+// Validate database URLs
+const masterUrl = process.env.DATABASE_URL_MASTER || process.env.DATABASE_URL;
+const replicaUrl =
+  process.env.DATABASE_URL_REPLICA ||
+  process.env.DATABASE_URL_MASTER ||
+  process.env.DATABASE_URL;
+
+console.log(`📊 Database URLs:
+  Master: ${masterUrl?.replace(/:[^:@]*@/, ":****@")}
+  Replica: ${replicaUrl?.replace(/:[^:@]*@/, ":****@")}`);
+
+// Master database for writes
+export const prismaMaster = new PrismaClient({
+  ...connectionConfig,
+  datasources: {
+    db: { url: masterUrl },
+  },
 });
 
 // Read replica for reads
 export const prismaReplica = new PrismaClient({
+  ...connectionConfig,
   datasources: {
-    db: {
-      url: process.env.DATABASE_URL_REPLICA || process.env.DATABASE_URL,
-    },
+    db: { url: replicaUrl },
   },
-  log:
-    process.env.NODE_ENV === "development"
-      ? ["query", "info", "warn", "error"]
-      : ["error"],
 });
 
-// Connection pool configuration
-const connectionPoolConfig = {
-  pool_max_conns: 20,
-  pool_min_conns: 5,
-  pool_timeout: 30,
-  statement_timeout: 30000,
-  query_timeout: 30000,
-};
+// Test connections on startup with better error handling
+prismaMaster
+  .$connect()
+  .then(() => console.log("✅ Master database connected"))
+  .catch((err) =>
+    console.error("❌ Master database connection failed:", err.message)
+  );
+
+prismaReplica
+  .$connect()
+  .then(() => console.log("✅ Replica database connected"))
+  .catch((err) => {
+    console.warn(
+      "⚠️ Replica database connection failed, will use master:",
+      err.message
+    );
+  });
 
 // Enhanced connection URLs with pooling
-let masterUrl, replicaUrl;
+export const prismaPooledMaster = new PrismaClient({
+  ...connectionConfig,
+  datasources: { db: { url: masterUrl } },
+});
 
-try {
-  masterUrl = new URL(
-    process.env.DATABASE_URL_MASTER || process.env.DATABASE_URL
-  );
-  replicaUrl = new URL(
-    process.env.DATABASE_URL_REPLICA || process.env.DATABASE_URL
-  );
-
-  Object.entries(connectionPoolConfig).forEach(([key, value]) => {
-    masterUrl.searchParams.set(key, value.toString());
-    replicaUrl.searchParams.set(key, value.toString());
-  });
-} catch (error) {
-  console.warn("URL parsing failed, using basic connection");
-}
-
-// Pooled connections
-export const prismaPooledMaster = masterUrl
-  ? new PrismaClient({
-      datasources: { db: { url: masterUrl.toString() } },
-    })
-  : prismaMaster;
-
-export const prismaPooledReplica = replicaUrl
-  ? new PrismaClient({
-      datasources: { db: { url: replicaUrl.toString() } },
-    })
-  : prismaReplica;
+export const prismaPooledReplica = new PrismaClient({
+  ...connectionConfig,
+  datasources: { db: { url: replicaUrl } },
+});
 
 // Smart routing with fallback
 export class DatabaseRouter {
@@ -83,16 +81,16 @@ export class DatabaseRouter {
   }
 }
 
-// Default export for backward compatibility
+// Default exports
 export const prisma = prismaMaster;
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
   console.log("Shutting down database connections...");
-  await prismaMaster.$disconnect();
-  await prismaReplica.$disconnect();
-  if (prismaPooledMaster !== prismaMaster)
-    await prismaPooledMaster.$disconnect();
-  if (prismaPooledReplica !== prismaReplica)
-    await prismaPooledReplica.$disconnect();
+  await Promise.all([
+    prismaMaster.$disconnect(),
+    prismaReplica.$disconnect(),
+    prismaPooledMaster.$disconnect(),
+    prismaPooledReplica.$disconnect(),
+  ]);
 });

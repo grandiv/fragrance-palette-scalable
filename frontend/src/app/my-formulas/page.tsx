@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 
 interface Formula {
-  id: string;
+  id: number; // ✅ Changed from string to number
   name: string;
   description: string;
   createdAt: string;
@@ -233,7 +233,10 @@ export default function MyFormulas() {
                   <span>
                     Created {new Date(formula.createdAt).toLocaleDateString()}
                   </span>
-                  <span className="text-gray-400">#{formula.id.slice(-6)}</span>
+                  {/* ✅ Fixed: Convert number to string and handle edge cases */}
+                  <span className="text-gray-400">
+                    #{formula.id.toString().padStart(6, "0")}
+                  </span>
                 </div>
               </Card>
             ))}

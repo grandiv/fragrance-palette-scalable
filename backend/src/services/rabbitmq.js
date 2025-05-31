@@ -92,10 +92,15 @@ async function startFormulaGenerationConsumer() {
               fragranceFamilyId: formulaResponse.fragranceFamilyId,
               name: formulaResponse.name,
               description: formulaResponse.description,
-              topNote: formulaResponse.topNote,
-              middleNote: formulaResponse.middleNote,
-              baseNote: formulaResponse.baseNote,
-              mixing: formulaResponse.mixing,
+              notes: {
+                top: formulaResponse.topNote,
+                middle: formulaResponse.middleNote,
+                base: formulaResponse.baseNote,
+              },
+              ingredients: {
+                mixing: formulaResponse.mixing,
+                instructions: formulaResponse.mixing,
+              },
             },
             include: {
               fragranceFamily: true,

@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { prismaReplica as prisma } from "../utils/prisma.js";
+import { prismaMaster as prisma } from "../utils/prisma.js";
 
 export const authMiddleware = async (req, res, next) => {
   try {
@@ -10,8 +10,11 @@ export const authMiddleware = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Use master database for auth checks (more reliable)
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
+      select: { id: true, email: true, name: true }, // Only select needed fields
     });
 
     if (!user) {

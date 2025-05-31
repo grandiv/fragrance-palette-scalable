@@ -193,7 +193,7 @@ services:
       - PORT=3001
       - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
-      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances
       - REDIS_HOST=redis-master
       - REDIS_PORT=6379
       - REDIS_URL=redis://redis-master:6379
@@ -236,7 +236,7 @@ services:
       - PORT=3001 # ✅ Internal port stays 3001
       - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
-      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
       - REDIS_HOST=redis-master
       - REDIS_PORT=6379
       - REDIS_URL=redis://redis-master:6379
@@ -279,7 +279,7 @@ services:
       - PORT=3001 # ✅ Internal port stays 3001
       - DATABASE_URL=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
       - DATABASE_URL_MASTER=postgresql://postgres:postgresmaster@postgres-master:5432/fragrances
-      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances,postgresql://postgres:postgresmaster@postgres-replica-2:5432/fragrances
+      - DATABASE_URL_REPLICA=postgresql://postgres:postgresmaster@postgres-replica-1:5432/fragrances
       - REDIS_HOST=redis-master
       - REDIS_PORT=6379
       - REDIS_URL=redis://redis-master:6379

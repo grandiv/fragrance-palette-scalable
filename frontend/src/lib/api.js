@@ -8,6 +8,7 @@ const apiClient = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+  timeout: 30000, // 30 second timeout
 });
 
 // Request interceptor to add auth token
@@ -23,9 +24,20 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    console.error("API Error:", error.response?.data || error.message);
+
     if (error.response?.status === 401) {
+      console.log("Unauthorized - removing token and redirecting to login");
       Cookies.remove("token");
-      window.location.href = "/login";
+
+      // Only redirect if we're not already on login/register pages
+      if (
+        typeof window !== "undefined" &&
+        !window.location.pathname.includes("/login") &&
+        !window.location.pathname.includes("/register")
+      ) {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }

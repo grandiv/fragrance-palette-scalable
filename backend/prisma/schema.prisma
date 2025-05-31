@@ -1,13 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
+// backend/prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
   binaryTargets = ["native", "linux-musl"]
-  // output   = "../src/generated/prisma"
 }
 
 datasource db {
@@ -16,39 +10,42 @@ datasource db {
 }
 
 model User {
-  id       String   @id @default(cuid())
-  email    String   @unique
-  name     String?
-  password String?
-  formulas Formula[]
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  name      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  formulas  Formula[]
+
+  @@map("User")
 }
 
 model FragranceFamily {
-  id          String    @id @default(cuid())
+  id          Int       @id @default(autoincrement())
   name        String    @unique
-  description String
-  ingredients String[]
-  formulas    Formula[]
+  description String?
+  ingredients Json?
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  formulas    Formula[]
+
+  @@map("FragranceFamily")
 }
 
 model Formula {
-  id              String         @id @default(cuid())
-  userId          String
-  fragranceFamilyId String
-  name            String
-  description     String
-  topNote         String
-  middleNote      String
-  baseNote        String
-  mixing          String
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  user            User           @relation(fields: [userId], references: [id])
-  fragranceFamily FragranceFamily @relation(fields: [fragranceFamilyId], references: [id])
+  id                Int              @id @default(autoincrement())
+  name              String
+  description       String?
+  ingredients       Json?
+  notes             Json?
+  userId            Int
+  fragranceFamilyId Int?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
   
-  @@index([userId])
-  @@index([fragranceFamilyId])
+  user              User             @relation(fields: [userId], references: [id])
+  fragranceFamily   FragranceFamily? @relation(fields: [fragranceFamilyId], references: [id])
+
+  @@map("Formula")
 }

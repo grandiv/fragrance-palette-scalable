@@ -40,8 +40,13 @@ export const getUserFormulas = async (req, res) => {
       ),
     ]);
 
+    const transformedFormulas = formulas.map((formula) => ({
+      ...formula,
+      id: formula.id.toString(), // Convert to string
+    }));
+
     const result = {
-      formulas,
+      formulas: transformedFormulas,
       pagination: {
         page,
         limit,
