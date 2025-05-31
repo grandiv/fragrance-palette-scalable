@@ -1,23 +1,37 @@
+# monitoring/prometheus.yml
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
-rule_files:
-  # - "first_rules.yml"
-
 scrape_configs:
   - job_name: "prometheus"
     static_configs:
-      - targets: ["localhost:9090"]
+      - targets: ["localhost:9090"] # Prometheus scraping itself
 
   - job_name: "fragrance-backend"
     static_configs:
-      - targets: ["host.docker.internal:3001"]
-    metrics_path: "/api/metrics"
+      - targets: ["backend:3001"] # Docker Compose service name and internal port
+    metrics_path: "/api/metrics" # Path defined in your backend's metrics route
     scrape_interval: 10s
-    scrape_timeout: 5s
 
-  - job_name: "docker"
-    static_configs:
-      - targets: ["host.docker.internal:9323"]
-    scrape_interval: 30s
+  # Uncomment and configure if you add these exporters
+  # - job_name: "postgres-exporter"
+  #   static_configs:
+  #     - targets: ["postgres-exporter:9187"]
+  #   scrape_interval: 30s
+
+  # - job_name: "redis-exporter"
+  #   image: oliver006/redis_exporter:latest # Example, add to docker-compose if used
+  #   static_configs:
+  #     - targets: ["redis-exporter:9121"] # If you add a redis_exporter service
+  #   scrape_interval: 30s
+
+  # Optional: Cadvisor for Docker container metrics (if you run Cadvisor as another service)
+  # - job_name: 'cadvisor'
+  #   static_configs:
+  #     - targets: ['cadvisor:8080']
+
+  # Optional: Node Exporter for host metrics (if you run Node Exporter)
+  # - job_name: 'node-exporter'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']

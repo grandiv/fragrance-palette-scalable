@@ -18,24 +18,38 @@ spec:
       containers:
         - name: frontend
           image: fragrance-frontend:latest
-          imagePullPolicy: Never # Use local image from Docker Desktop
+          imagePullPolicy: Never
           ports:
             - containerPort: 3000
           env:
             - name: NEXT_PUBLIC_API_URL
-              value: "http://localhost:8080/api" # Through NGINX load balancer
+              value: "http://localhost:8080/api"
+            - name: NODE_ENV
+              value: "production"
           livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
             httpGet:
               path: /
               port: 3000
             initialDelaySeconds: 30
             periodSeconds: 10
-          readinessProbe:
+            timeoutSeconds: 10
+            failureThreshold: 3
+          startupProbe:
             httpGet:
               path: /
               port: 3000
-            initialDelaySeconds: 10
-            periodSeconds: 5
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 12
           resources:
             requests:
               memory: "256Mi"

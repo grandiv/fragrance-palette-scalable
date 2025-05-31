@@ -76,9 +76,9 @@ fi
 
 # Wait for application services with longer timeout
 echo -e "${YELLOW}⏳ Waiting for application services (this may take several minutes)...${NC}"
-kubectl wait --for=condition=ready pod -l app=backend --timeout=600s -n fragrance-palette
-kubectl wait --for=condition=ready pod -l app=frontend --timeout=300s -n fragrance-palette
-kubectl wait --for=condition=ready pod -l app=nginx --timeout=300s -n fragrance-palette
+kubectl wait --for=condition=ready pod -l app=backend --timeout=60s -n fragrance-palette
+kubectl wait --for=condition=ready pod -l app=frontend --timeout=30s -n fragrance-palette
+kubectl wait --for=condition=ready pod -l app=nginx --timeout=30s -n fragrance-palette
 
 # Set up port forwarding for easy access
 echo -e "${YELLOW}🔗 Setting up port forwarding...${NC}"

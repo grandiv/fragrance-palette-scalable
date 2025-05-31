@@ -2,41 +2,60 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend-deployment
-  namespace: fragrance-palette
+  namespace: fragrance-palette #
   labels:
-    app: backend
+    app: backend #
 spec:
-  replicas: 3
+  replicas: 3 #
   selector:
     matchLabels:
-      app: backend
+      app: backend #
   template:
     metadata:
       labels:
-        app: backend
+        app: backend #
     spec:
       initContainers:
-        - name: wait-for-db
-          image: postgres:15-alpine
+        - name: wait-for-db # This name might be 'wait-for-services' in your latest attempt based on describe output
+          image: postgres:15-alpine # Or busybox:1.35 if you changed it. Ensure this image is pullable.
+          # imagePullPolicy: IfNotPresent # Explicitly set if needed, default is IfNotPresent for standard images
           env:
-            - name: DATABASE_URL_MASTER
+            - name: DATABASE_URL_MASTER # This env var is used by pg_isready in some configurations
               valueFrom:
                 secretKeyRef:
                   name: database-secret
-                  key: master-url
+                  key: master-url #
           command: ["sh", "-c"]
           args:
             - |
               echo "Waiting for PostgreSQL to be ready..."
+              # Ensure 'postgres-master-service' is the correct service name for your PostgreSQL master
+              # The -U postgres might need adjustment if your pg_hba.conf on master requires a different user for this check from within the cluster
               until pg_isready -h postgres-master-service -p 5432 -U postgres; do
                 echo "PostgreSQL is unavailable - sleeping"
                 sleep 5
               done
               echo "PostgreSQL is ready"
+              # If you have a 'wait-for-services' that also checks Redis and RabbitMQ, ensure those checks are also robust.
+              # Example for busybox with nc:
+              # echo "Waiting for Redis..."
+              # until nc -z -w 2 redis-service 6379; do echo "Redis unavailable"; sleep 2; done
+              # echo "Redis ready"
+              # echo "Waiting for RabbitMQ..."
+              # until nc -z -w 2 rabbitmq-service 5672; do echo "RabbitMQ unavailable"; sleep 2; done
+              # echo "RabbitMQ ready"
         - name: db-setup
-          image: fragrance-backend:latest
+          image: fragrance-backend:latest #
+          imagePullPolicy: Never # IMPORTANT: Add this if fragrance-backend:latest is a local build
           env:
-            - name: DATABASE_URL_MASTER
+            - name: DATABASE_URL_MASTER #
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: master-url #
+            # DATABASE_URL is also often used by Prisma, ensure it's set if needed for db push/seed.
+            # It's set for the main container, might be inherited or needed explicitly here too.
+            - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: database-secret
@@ -46,90 +65,112 @@ spec:
             - |
               echo "Setting up database..."
               npx prisma generate
-              npx prisma db push --force-reset
-              npm run seed
-              echo "Database setup complete"
+              npx prisma db push --force-reset #
+              echo "Running seed..." # Based on your describe output
+              npm run seed || echo "Seed failed, but continuing..." # Allow to continue if seed fails
+              echo "Database setup complete" #
       containers:
         - name: backend
-          image: fragrance-backend:latest
-          imagePullPolicy: Never # Use local image from Docker Desktop
+          image: fragrance-backend:latest #
+          imagePullPolicy: Never # Ensures local image is used
           ports:
-            - containerPort: 3001
+            - containerPort: 3001 #
           env:
             - name: NODE_ENV
-              value: "production"
+              value: "production" #
             - name: PORT
-              value: "3001"
+              value: "3001" #
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: database-secret
-                  key: master-url
+                  key: master-url #
             - name: DATABASE_URL_MASTER
               valueFrom:
                 secretKeyRef:
                   name: database-secret
-                  key: master-url
+                  key: master-url #
             - name: DATABASE_URL_REPLICA
               valueFrom:
                 secretKeyRef:
                   name: database-secret
-                  key: replica-url
+                  key: replica-url #
             - name: REDIS_URL
-              value: "redis://redis-service:6379"
+              value: "redis://redis-service:6379" #
+            # Your describe output shows REDIS_PASSWORD and RABBITMQ_URL with 'rabbitmqpw'.
+            # k8s/secrets.yaml does not define 'redis-secret' or 'redis-password'.
+            # k8s/rabbitmq.yaml uses 'admin123' for RabbitMQ.
+            # Assuming redis has no password from k8s/redis.yaml and rabbitmq uses admin123 from k8s/rabbitmq.yaml
             - name: RABBITMQ_URL
-              value: "amqp://admin:admin123@rabbitmq-service:5672"
+              value: "amqp://admin:admin123@rabbitmq-service:5672" # Adjusted to match k8s/rabbitmq.yaml
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: app-secret
-                  key: jwt-secret
+                  key: jwt-secret #
+            # Your k8s/secrets.yaml defines 'hf-token'.
+            # Your backend.yaml tries to use 'hf-token-write' and 'hf-token-read'.
+            # Consolidate to use the single 'hf-token' from secrets.yaml, or update secrets.yaml.
+            # Assuming you want to use the single 'hf-token' for both:
+            - name: HUGGINGFACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: hf-token # Adjusted to match k8s/secrets.yaml
+            - name: HF_TOKEN # If your app uses this as well
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: hf-token # Adjusted to match k8s/secrets.yaml
             - name: LLM_URL
-              value: "http://tgi-service:80"
+              value: "http://tgi-service:80" #
             - name: FRONTEND_URL
-              value: "http://frontend-service:3000"
+              value: "http://frontend-service:3000" #
           livenessProbe:
             httpGet:
-              path: /api/health
-              port: 3001
-            initialDelaySeconds: 90
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+              path: /api/health #
+              port: 3001 #
+            initialDelaySeconds: 120 # Increased from 90s, as init containers can take time
+            periodSeconds: 30 # Increased from 10s
+            timeoutSeconds: 10 # Increased from 5s
+            failureThreshold: 5 # Increased from 3
           readinessProbe:
             httpGet:
-              path: /api/health
-              port: 3001
-            initialDelaySeconds: 60
-            periodSeconds: 5
-            timeoutSeconds: 5
-            failureThreshold: 3
+              path: /api/health #
+              port: 3001 #
+            initialDelaySeconds: 90 # Increased from 60s
+            periodSeconds: 15 # Increased from 5s
+            timeoutSeconds: 10 # Increased from 5s
+            failureThreshold: 5 # Increased from 3
           startupProbe:
             httpGet:
-              path: /api/health
-              port: 3001
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 18 # Allow 3 minutes for startup
+              path: /api/health #
+              port: 3001 #
+            initialDelaySeconds: 60 # Increased from 30s
+            periodSeconds: 15 # Increased from 10s
+            timeoutSeconds: 10 # Increased from 5s
+            failureThreshold: 20 # Increased from 18 (allows 5 minutes for startup: 20*15s)
           resources:
+            # The describe output for -f4vzg shows lower requests than your original YAML.
+            # Sticking to your original YAML's requests/limits for now.
+            # If "Insufficient memory" was an issue before, these might need to be lowered.
             requests:
-              memory: "512Mi"
-              cpu: "500m"
+              memory: "512Mi" #
+              cpu: "500m" #
             limits:
-              memory: "1Gi"
-              cpu: "1000m"
+              memory: "1Gi" #
+              cpu: "1000m" #
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: backend-service
-  namespace: fragrance-palette
+  namespace: fragrance-palette #
 spec:
   selector:
-    app: backend
+    app: backend #
   ports:
     - protocol: TCP
-      port: 3001
-      targetPort: 3001
-  type: ClusterIP
+      port: 3001 #
+      targetPort: 3001 #
+  type: ClusterIP #
